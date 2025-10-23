@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <cstdio>
-#include <iostream>
 #include <cstring>
 
 EpollLoop::EpollLoop(int max_events) : max_events_(max_events)

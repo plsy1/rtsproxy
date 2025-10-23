@@ -1,7 +1,5 @@
 #include "stun.h"
-#include <iostream>
 #include <cstring>
-#include <cstdlib>
 #include <ctime>
 #include <arpa/inet.h>
 #include <netdb.h>

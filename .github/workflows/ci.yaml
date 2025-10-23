@@ -1,9 +1,9 @@
 name: Build
 
 on:
-  push:
-    branches:
-      - main
+  # push:
+  #   branches:
+  #     - main
   release:
     types:
       - published
@@ -197,7 +197,7 @@ jobs:
       - name: Build ${{ matrix.name }}
         run: |
           rm -rf builddir
-          meson setup builddir --cross-file=musl-crossfile-${{ matrix.name }}.ini --strip --buildtype=release
+          meson setup builddir --cross-file=musl-crossfile-${{ matrix.name }}.ini --strip --buildtype=release -Disstatic=true
           meson compile -C builddir -j$(nproc)
           cp builddir/rtsproxy rtsproxy-linux-${{ matrix.name }}
       - name: Upload ${{ matrix.name }}

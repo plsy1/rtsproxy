@@ -12,7 +12,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cerrno>
-#include <iostream>
 #include <sstream>
 #include <cstring>
 #include <sys/timerfd.h>
@@ -564,7 +563,6 @@ void RTSPClient::on_rtp_control_readable()
         if (ServerConfig::isNatEnabled() == true)
         {
             StunClient::extract_stun_mapping_from_response(buf.get(), recv_len, nat_wan_ip, nat_wan_port);
-            std::cout << "nat_wan_port: " << nat_wan_port << std::endl;
             loop->set(rtp_ctx_, rtp_fd_, EPOLLIN);
         }
         buffer_pool_.release(std::move(buf));

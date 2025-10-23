@@ -10,11 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <cstring>
-#include <iostream>
-#include <vector>
 #include <getopt.h>
-#include <cstdlib>
 
 int create_listen_socket(int port)
 {
@@ -40,6 +36,8 @@ int create_listen_socket(int port)
 
 int main(int argc, char *argv[])
 {
+
+    Logger::setLogLevel(LogLevel::INFO);
 
     struct option long_options[] =
         {

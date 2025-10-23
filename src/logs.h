@@ -13,6 +13,7 @@ enum class LogLevel
 class Logger
 {
 public:
+    static void setLogLevel(LogLevel level);
     static void log(LogLevel level, const std::string &msg);
     static void info(const std::string &msg);
     static void warn(const std::string &msg);
@@ -20,6 +21,7 @@ public:
     static void debug(const std::string &msg);
 
 private:
+    static LogLevel currentLevel;
     static std::string logLevelToString(LogLevel level);
     static std::string getCurrentTime();
 };

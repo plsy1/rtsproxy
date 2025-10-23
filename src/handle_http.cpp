@@ -26,8 +26,23 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     ssize_t n = recv(client_fd, buf, sizeof(buf) - 1, 0);
     if (n <= 0)
     {
+        if (n == 0)
+        {
 
-        Logger::error("Error occurred or client disconnected unexpectedly.");
+            Logger::debug("Client disconnected gracefully (EOF).");
+        }
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                Logger::debug("Resource temporarily unavailable: No data to read, retrying later.");
+            }
+            else
+            {
+                Logger::debug(std::string("Client request receive failed: ") + strerror(errno));
+            }
+        }
+
         close(client_fd);
         return;
     }

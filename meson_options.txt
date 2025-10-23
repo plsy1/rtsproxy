@@ -1,0 +1,1 @@
+option('isstatic', type: 'boolean', value: false, description: 'Enable static compilation')

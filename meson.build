@@ -4,9 +4,18 @@ project(
     default_options: ['cpp_std=c++17','warning_level=2','prefix=' + meson.current_source_dir()],
 )
 
-src_dir = 'src'
+is_static = get_option('isstatic')
 
-ldflags = ['-static']
+ldflags = []
+
+if is_static
+    message('Static compilation is enabled.')
+    ldflags += ['-static']
+else
+    message('Static compilation is disabled.')
+endif
+
+src_dir = 'src'
 
 executable(
     'rtsproxy',
@@ -22,6 +31,5 @@ executable(
     include_directories: include_directories(src_dir),
     install: true,
     install_dir: 'bin',
-    cpp_args: ['-O2', '-Wall'],
     link_args: ldflags,
 )

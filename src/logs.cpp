@@ -5,8 +5,19 @@
 #include <sstream>
 #include <iomanip>
 
+LogLevel Logger::currentLevel = LogLevel::INFO;
+
+void Logger::setLogLevel(LogLevel level)
+{
+    currentLevel = level;
+}
+
 void Logger::log(LogLevel level, const std::string &msg)
 {
+    if (level > currentLevel)
+    {
+        return;
+    }
     std::string level_str = logLevelToString(level);
     std::string timestamp = getCurrentTime();
     std::cout << "[" << timestamp << "] [" << level_str << "] " << msg << std::endl;
