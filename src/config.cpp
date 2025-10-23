@@ -5,6 +5,8 @@ int ServerConfig::port = 8554;
 bool ServerConfig::enable_nat = false;
 int ServerConfig::rtp_buffer_size = 4096;
 int ServerConfig::udp_packet_size = 1500;
+int ServerConfig::stun_server_port = 19302;
+std::string ServerConfig::stun_server_host = "stun.l.google.com";
 
 void ServerConfig::setPort(int p)
 {
@@ -24,6 +26,16 @@ void ServerConfig::setRtpBufferSize(int size)
 void ServerConfig::setUdpPacketSize(int size)
 {
     udp_packet_size = size;
+}
+
+void ServerConfig::setStunPort(int port)
+{
+    stun_server_port = port;
+}
+
+void ServerConfig::setStunHost(std::string host)
+{
+    stun_server_host = host;
 }
 
 int ServerConfig::getPort()
@@ -46,6 +58,16 @@ int ServerConfig::getUdpPacketSize()
     return udp_packet_size;
 }
 
+int ServerConfig::getStunPort()
+{
+    return stun_server_port;
+}
+
+std::string ServerConfig::getStunHost()
+{
+    return stun_server_host;
+}
+
 void ServerConfig::printUsage(const std::string &program_name)
 {
     std::cout << "Usage: " << program_name << " [options]" << std::endl;
@@ -54,5 +76,6 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -n, --enable-nat            Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
     std::cout << "  -r, --rtp-buffer-size <size> Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size> Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
+    std::cout << "  --set-stun-host, <port> Set STUN server host (default: " << stun_server_host << ")" << std::endl;
+    std::cout << "  --set-stun-port, <port> Set STUN server port (default: " << stun_server_port << ")" << std::endl;
 }
-

@@ -1,4 +1,5 @@
 #include "stun.h"
+#include "config.h"
 #include <cstring>
 #include <ctime>
 #include <arpa/inet.h>
@@ -6,15 +7,12 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <cstdint> 
+#include <cstdint>
 
 #define STUN_MSG_BINDING_REQUEST 0x0001
 #define STUN_ATTR_XOR_MAPPED_ADDR 0x0020
 #define STUN_ATTR_MAPPED_ADDR 0x0001
 #define STUN_MAGIC_COOKIE 0x2112A442
-
-const std::string stun_host = "stun.l.google.com";
-int stun_port = 19302;
 
 void StunClient::gen_tid(unsigned char tid[12])
 {
@@ -40,12 +38,12 @@ int StunClient::stun_get_mapping(int s, std::string &out_pub_ip, int &out_pub_po
 
     struct addrinfo hints = {}, *res = nullptr;
     char sport[16];
-    snprintf(sport, sizeof(sport), "%d", stun_port);
+    snprintf(sport, sizeof(sport), "%d", ServerConfig::getStunPort());
 
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if (getaddrinfo(stun_host.c_str(), sport, &hints, &res) != 0)
+    if (getaddrinfo(ServerConfig::getStunHost().c_str(), sport, &hints, &res) != 0)
     {
         return -1;
     }
@@ -163,12 +161,12 @@ int StunClient::send_stun_mapping_request(int s)
 
     struct addrinfo hints = {}, *res = nullptr;
     char sport[16];
-    snprintf(sport, sizeof(sport), "%d", stun_port);
+    snprintf(sport, sizeof(sport), "%d", ServerConfig::getStunPort());
 
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if (getaddrinfo(stun_host.c_str(), sport, &hints, &res) != 0)
+    if (getaddrinfo(ServerConfig::getStunHost().c_str(), sport, &hints, &res) != 0)
     {
         return -1;
     }

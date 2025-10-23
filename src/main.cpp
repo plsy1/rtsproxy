@@ -45,6 +45,8 @@ int main(int argc, char *argv[])
             {"enable-nat", no_argument, nullptr, 'n'},
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
+            {"set-stun-port", required_argument, nullptr, 0},
+            {"set-stun-host", required_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
@@ -63,6 +65,16 @@ int main(int argc, char *argv[])
             break;
         case 'u':
             ServerConfig::setUdpPacketSize(std::atoi(optarg));
+            break;
+        case 0:
+            if (strcmp(long_options[opt].name, "set-stun-port") == 0)
+            {
+                ServerConfig::setStunPort(std::atoi(optarg));
+            }
+            else if (strcmp(long_options[opt].name, "set-stun-host") == 0)
+            {
+                ServerConfig::setStunHost(optarg);
+            }
             break;
         default:
             ServerConfig::printUsage(argv[0]);
