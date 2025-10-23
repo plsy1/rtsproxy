@@ -199,7 +199,8 @@ jobs:
           rm -rf builddir
           meson setup builddir --cross-file=musl-crossfile-${{ matrix.name }}.ini --strip --buildtype=release -Disstatic=true
           meson compile -C builddir -j$(nproc)
-          cp builddir/rtsproxy rtsproxy-linux-${{ matrix.name }}
+          meson install -C builddir
+          cp bin/rtsproxy rtsproxy-linux-${{ matrix.name }}
       - name: Upload ${{ matrix.name }}
         uses: actions/upload-artifact@v4
         with:
