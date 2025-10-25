@@ -1,6 +1,5 @@
 #pragma once
 
-#include <unordered_map>
 #include <string>
 #include <queue>
 #include <vector>
@@ -31,50 +30,30 @@ struct RtspRequest
 class BufferPool;
 class SocketCtx;
 class Packet;
-struct RTSPClientInfo;
+struct RTSPClientCtx;
 
 class RTSPClient
 {
 public:
-    explicit RTSPClient(const RTSPClientInfo &info, EpollLoop *loop, BufferPool &pool);
+    explicit RTSPClient(const RTSPClientCtx &info, EpollLoop *loop, BufferPool &pool);
     ~RTSPClient();
 
     using ClosedCallback = std::function<void()>;
 
     void set_on_closed_callback(ClosedCallback cb);
 
-    bool connect_server();
-    void push_request_into_queue(const std::string &method,
-                                 const std::string &extra_headers = "",
-                                 const std::string &body = "");
-
-    void on_tcp_control_writable();
-    void on_tcp_control_readable();
-    void on_rtp_control_writable();
-    void on_rtp_control_readable();
-    void on_rtcp_control_writable();
-    void on_rtcp_control_readable();
-    void on_client_control_writable();
-    void on_client_control_readable();
-    void on_client_control_closed();
     void handle_tcp_control(uint32_t event);
     void handle_rtp_control(uint32_t event);
     void handle_rtcp_control(uint32_t event);
     void handle_client_control(uint32_t event);
 
-    int get_fd() const;
-    int get_rtp_fd() const;
-    int get_rtcp_fd() const;
-    int get_client_fd() const;
-    void init_client_fd();
-    std::vector<int> get_fds() const;
-
-    EpollLoop *loop;
-
-    bool is_init_ok = false;
-
 private:
     ClosedCallback on_closed_callback_;
+    void init_client_fd();
+    bool connect_server();
+    void push_request_into_queue(const std::string &method,
+                                 const std::string &extra_headers = "",
+                                 const std::string &body = "");
     void parse_url(const std::string &url);
     void build_and_send_request();
     std::string build_uri_for_method(const std::string &method) const;
@@ -94,21 +73,29 @@ private:
     void on_timer_fd(uint32_t event);
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
-
     int get_random_rtp_port();
 
+    void on_tcp_control_writable();
+    void on_tcp_control_readable();
+    void on_rtp_control_writable();
+    void on_rtp_control_readable();
+    void on_rtcp_control_writable();
+    void on_rtcp_control_readable();
+    void on_client_control_writable();
+    void on_client_control_readable();
+    void on_client_control_closed();
+
 private:
-    EpollLoop *loop_;
+    EpollLoop *loop;
     int client_fd_;
     int client_rtp_port_;
     sockaddr_in client_addr_;
     std::string rtsp_url;
     BufferPool &buffer_pool_;
-
     SocketCtx *sock_ctx_ = nullptr;
     SocketCtx *rtp_ctx_ = nullptr;
     SocketCtx *rtcp_ctx_ = nullptr;
-    SocketCtx *client_ctx_ = nullptr;
+    SocketCtx *common_ = nullptr;
     SocketCtx *timer_ctx = nullptr;
     int sockfd_ = -1;
     int rtp_fd_ = -1;
@@ -122,10 +109,8 @@ private:
     std::string path_;
     std::string track_;
     std::string session_id_;
-
     std::string req_buf_;
     std::string resp_buf_;
-
     RtspRequest current_request_;
     std::queue<RtspRequest> request_queue_;
     std::deque<Packet> send_queue_;
@@ -135,7 +120,7 @@ private:
     struct sockaddr_in server_rtp_addr_{};
     struct sockaddr_in server_rtcp_addr_{};
     size_t payload_offset;
-
     std::string nat_wan_ip;
     int nat_wan_port = 0;
+    bool is_init_ok = false;
 };

@@ -1,7 +1,7 @@
-#include "rtsp.h"
-#include "epoll.h"
-#include "socket_ctx.h"
-#include "logs.h"
+#include "../include/rtsp_client.h"
+#include "../include/epoll_loop.h"
+#include "../include/common/socket_ctx.h"
+#include "../include/logger.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <cerrno>
@@ -28,7 +28,7 @@ EpollLoop::~EpollLoop()
 void EpollLoop::add_task(std::function<void()> task)
 {
     std::lock_guard<std::mutex> lock(task_queue_mutex_);
-    task_queue_.push(task); // Add task to the queue
+    task_queue_.push(task);
 }
 
 void EpollLoop::process_tasks()
@@ -39,7 +39,7 @@ void EpollLoop::process_tasks()
     {
         auto task = task_queue_.front();
         task_queue_.pop();
-        task(); // Execute the task
+        task();
     }
 }
 

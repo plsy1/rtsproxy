@@ -1,9 +1,11 @@
-#include "handle_http.h"
-#include "logs.h"
-#include "epoll.h"
-#include "rtsp.h"
-#include "buffer_pool.h"
-#include "client_info.h"
+#include "../include/handle.h"
+#include "../include/logger.h"
+#include "../include/epoll_loop.h"
+#include "../include/rtsp_client.h"
+#include "../include/buffer_pool.h"
+#include "../include/common/rtsp_client.h"
+#include <unistd.h>
+#include <arpa/inet.h> 
 
 bool parse_http_url(const std::string &url, std::string &host, int &port, std::string &path)
 {
@@ -76,7 +78,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     Logger::info("New http client request: " + client_host + " -> " + rtsp_url);
 
-    RTSPClientInfo info{
+    RTSPClientCtx info{
         .rtsp_url = rtsp_url,
         .client_fd = client_fd,
         .client_addr = client_addr};

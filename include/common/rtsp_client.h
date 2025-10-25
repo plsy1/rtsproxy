@@ -1,9 +1,9 @@
 #pragma once
 
 #include <string>
-#include <arpa/inet.h>
+#include <netinet/in.h>
 
-struct RTSPClientInfo
+struct RTSPClientCtx
 {
     std::string rtsp_url;
     int client_fd;

@@ -17,19 +17,21 @@ endif
 
 src_dir = 'src'
 
+inc_dir = 'include'
+
 executable(
     'rtsproxy',
     files(
         src_dir / 'main.cpp',
-        src_dir / 'epoll.cpp',
-        src_dir / 'rtsp.cpp',
-        src_dir / 'stun.cpp',
-        src_dir / 'handle_http.cpp',
-        src_dir / 'logs.cpp',
-        src_dir / 'config.cpp',
+        src_dir / 'epoll_loop.cpp',
+        src_dir / 'rtsp_client.cpp',
+        src_dir / 'stun_client.cpp',
+        src_dir / 'handle.cpp',
+        src_dir / 'logger.cpp',
+        src_dir / 'server_config.cpp',
     ),
-    include_directories: include_directories(src_dir),
-    install: true,
+    include_directories: include_directories(inc_dir),
+   install: true,
     install_dir: 'bin',
     link_args: ldflags,
 )

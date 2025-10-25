@@ -1,5 +1,5 @@
-#include "stun.h"
-#include "config.h"
+#include "../include/stun_client.h"
+#include "../include/server_config.h"
 #include <cstring>
 #include <ctime>
 #include <arpa/inet.h>

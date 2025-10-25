@@ -1,4 +1,4 @@
-#include "config.h"
+#include "../include/server_config.h"
 #include <iostream>
 
 int ServerConfig::port = 8554;

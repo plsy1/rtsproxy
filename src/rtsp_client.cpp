@@ -1,12 +1,12 @@
-#include "rtsp.h"
-#include "epoll.h"
-#include "tools.h"
-#include "logs.h"
-#include "config.h"
-#include "client_info.h"
-#include "buffer_pool.h"
-#include "socket_ctx.h"
-#include "stun.h"
+#include "../include/rtsp_client.h"
+#include "../include/epoll_loop.h"
+#include "../include/logger.h"
+#include "../include/server_config.h"
+#include "../include/buffer_pool.h"
+#include "../include/common/rtsp_client.h"
+#include "../include/common/socket_ctx.h"
+#include "../include/stun_client.h"
+#include "../include/utils.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -17,7 +17,7 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 
-RTSPClient::RTSPClient(const RTSPClientInfo &info, EpollLoop *loop, BufferPool &pool)
+RTSPClient::RTSPClient(const RTSPClientCtx &info, EpollLoop *loop, BufferPool &pool)
     : loop(loop),
       client_fd_(info.client_fd),
       client_addr_(info.client_addr),
@@ -67,10 +67,10 @@ RTSPClient::~RTSPClient()
         rtcp_ctx_ = nullptr;
     }
 
-    if (client_ctx_)
+    if (common_)
     {
-        delete client_ctx_;
-        client_ctx_ = nullptr;
+        delete common_;
+        common_ = nullptr;
     }
 
     if (timer_ctx)
@@ -163,10 +163,6 @@ bool RTSPClient::connect_server()
     state_ = RtspState::CONNECTING;
     return true;
 }
-
-int RTSPClient::get_fd() const { return sockfd_; }
-int RTSPClient::get_rtp_fd() const { return rtp_fd_; }
-int RTSPClient::get_rtcp_fd() const { return rtcp_fd_; }
 
 void RTSPClient::handle_tcp_control(uint32_t event)
 {
@@ -525,18 +521,6 @@ void RTSPClient::register_sockets_to_epoll(SocketCtx *ctx, uint32_t events)
     loop->set(ctx, ctx->fd, events);
 }
 
-std::vector<int> RTSPClient::get_fds() const
-{
-    std::vector<int> fds;
-    if (sockfd_ >= 0)
-        fds.push_back(sockfd_);
-    if (rtp_fd_ >= 0)
-        fds.push_back(rtp_fd_);
-    if (rtcp_fd_ >= 0)
-        fds.push_back(rtcp_fd_);
-    return fds;
-}
-
 void RTSPClient::on_rtp_control_writable()
 {
 }
@@ -576,8 +560,8 @@ void RTSPClient::on_rtp_control_readable()
         buffer_pool_.release(std::move(buf));
     }
 
-    if (loop && client_fd_ >= 0 && client_ctx_)
-        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
+    if (loop && client_fd_ >= 0 && common_)
+        loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
 }
 
 void RTSPClient::on_rtcp_control_writable()
@@ -618,7 +602,7 @@ void RTSPClient::on_client_control_writable()
     }
 
     if (send_queue_.empty())
-        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
+        loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
 }
 
 void RTSPClient::on_client_control_readable()
@@ -689,14 +673,12 @@ bool RTSPClient::start_getparameter_timer()
     return true;
 }
 
-int RTSPClient::get_client_fd() const { return client_fd_; }
-
 void RTSPClient::init_client_fd()
 {
-    client_ctx_ = new SocketCtx{
+    common_ = new SocketCtx{
         client_fd_,
         std::bind(&RTSPClient::handle_client_control, this, std::placeholders::_1)};
-    loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
+    loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
 
     send_http_response();
 }
