@@ -5,14 +5,39 @@
 #include "../include/buffer_pool.h"
 #include "../include/common/rtsp_client.h"
 #include "../include/parse_url.h"
+#include "../include/server_config.h"
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <regex>
-#include <iostream>
+
+void send_unauthorized(int client_fd)
+{
+    std::string response = "HTTP/1.1 401 Unauthorized\r\n"
+                           "Content-Type: text/html\r\n"
+                           "WWW-Authenticate: Basic realm=\"Restricted\"\r\n"
+                           "\r\n"
+                           "<html><body><h1>401 Unauthorized</h1></body></html>";
+    send(client_fd, response.c_str(), response.size(), 0);
+    close(client_fd);
+}
+
+std::map<std::string, std::string> parse_query_params(const std::string &query)
+{
+    std::map<std::string, std::string> params;
+    std::stringstream ss(query);
+    std::string kv;
+    while (std::getline(ss, kv, '&'))
+    {
+        size_t eq_pos = kv.find('=');
+        if (eq_pos != std::string::npos)
+        {
+            std::string key = kv.substr(0, eq_pos);
+            std::string value = kv.substr(eq_pos + 1);
+            params[key] = value;
+        }
+    }
+    return params;
+}
 
 void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop, BufferPool &pool)
 {
@@ -51,6 +76,38 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         size_t pos2 = req.find(' ', pos1);
         if (pos2 != std::string::npos)
             url = req.substr(pos1, pos2 - pos1);
+    }
+
+    std::string token;
+    size_t qpos = url.find('?');
+    if (qpos != std::string::npos)
+    {
+        std::string query_str = url.substr(qpos + 1);
+        url = url.substr(0, qpos);
+        auto params = parse_query_params(query_str);
+        auto it = params.find("token");
+
+        if (it != params.end())
+        {
+            token = it->second;
+        }
+    }
+
+    if (!ServerConfig::getToken().empty())
+    {
+        if (token.empty())
+        {
+            Logger::debug("Token missing in request");
+            send_unauthorized(client_fd);
+            return;
+        }
+
+        if (token != ServerConfig::getToken())
+        {
+            Logger::debug("Invalid token");
+            send_unauthorized(client_fd);
+            return;
+        }
     }
 
     std::string host, path;

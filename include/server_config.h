@@ -12,6 +12,7 @@ public:
     static void setStunPort(int port);
     static void setStunHost(std::string host);
     static void setJsonPath(std::string path);
+    static void setToken(std::string token);
     static int getPort();
     static bool isNatEnabled();
     static int getRtpBufferSize();
@@ -19,6 +20,7 @@ public:
     static int getStunPort();
     static std::string getStunHost();
     static std::string getJsonPath();
+    static std::string getToken();
     static void printUsage(const std::string &program_name);
 
 private:
@@ -29,4 +31,5 @@ private:
     static int stun_server_port;
     static std::string stun_server_host;
     static std::string json_path;
+    static std::string auth_token;
 };

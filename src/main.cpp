@@ -45,13 +45,14 @@ int main(int argc, char *argv[])
             {"enable-nat", no_argument, nullptr, 'n'},
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
+            {"set-auth-token", required_argument, nullptr, 't'},
             {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:j:", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -66,6 +67,9 @@ int main(int argc, char *argv[])
             break;
         case 'u':
             ServerConfig::setUdpPacketSize(std::atoi(optarg));
+            break;
+        case 't':
+            ServerConfig::setToken(optarg);
             break;
         case 'j':
             ServerConfig::setJsonPath(optarg);
