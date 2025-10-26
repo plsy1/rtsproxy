@@ -37,7 +37,7 @@ int create_listen_socket(int port)
 int main(int argc, char *argv[])
 {
 
-    Logger::setLogLevel(LogLevel::INFO);
+    Logger::setLogLevel(LogLevel::DEBUG);
 
     struct option long_options[] =
         {
@@ -118,16 +118,34 @@ int main(int argc, char *argv[])
                 break;
             }
             fcntl(client_fd, F_SETFL, O_NONBLOCK);
-            handle_http_request(client_fd, client_addr, &loop, pool);
+
+            auto ctx = std::make_shared<SocketCtx>();
+            ctx->fd = client_fd;
+            ctx->handler = [ctx, client_addr, &loop, &pool](uint32_t e)
+            {
+                [[maybe_unused]] uint32_t unused_events = e;
+                if (ctx->fd >= 0)
+                {
+                    Logger::debug("Handling request for client_fd: " + std::to_string(ctx->fd));
+                    handle_http_request(ctx->fd, client_addr, &loop, pool);
+                }
+                else
+                {
+                    Logger::error("Invalid client_fd, cannot handle request");
+                }
+            };
+
+            loop.set(ctx.get(), client_fd, EPOLLIN);
         }
     };
 
-    SocketCtx *listen_ctx = new SocketCtx{listen_fd, accept_handler};
-    loop.set(listen_ctx, listen_fd, EPOLLIN);
+    auto listen_ctx = std::make_shared<SocketCtx>();
+    listen_ctx->fd = listen_fd;
+    listen_ctx->handler = accept_handler;
+    loop.set(listen_ctx.get(), listen_fd, EPOLLIN);
 
     Logger::info("HTTP server listening on port " + std::to_string(listen_port));
     loop.loop();
 
-    delete listen_ctx;
     return 0;
 }

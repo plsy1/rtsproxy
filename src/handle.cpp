@@ -39,31 +39,41 @@ std::map<std::string, std::string> parse_query_params(const std::string &query)
     return params;
 }
 
-void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop, BufferPool &pool)
+void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop* loop, BufferPool& pool)
 {
+    if (client_fd < 0) 
+    {
+        Logger::error("Received request on invalid file descriptor");
+        return;
+    }
+
     char buf[4096];
     ssize_t n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-    if (n <= 0)
+    
+    if (n == 0)
     {
-        if (n == 0)
+        Logger::debug("Client disconnected gracefully (EOF).");
+        close(client_fd);
+        return;
+    }
+    else if (n < 0)
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) 
         {
-
-            Logger::debug("Client disconnected gracefully (EOF).");
+            Logger::debug("No data available yet, will retry later.");
+            return;
+        }
+        else if (errno == EBADF)
+        {
+            Logger::error("Received data from an invalid file descriptor.");
+            return;
         }
         else
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                Logger::debug("Resource temporarily unavailable: No data to read, retrying later.");
-            }
-            else
-            {
-                Logger::debug(std::string("Client request receive failed: ") + strerror(errno));
-            }
+            Logger::error("Client request receive failed: " + std::string(strerror(errno)));
+            close(client_fd);
+            return;
         }
-
-        close(client_fd);
-        return;
     }
 
     buf[n] = 0;
@@ -89,7 +99,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         if (it != params.end())
         {
             token = it->second;
-                        Logger::debug(token);
+            Logger::debug(token);
         }
     }
 
