@@ -29,6 +29,7 @@ executable(
         src_dir / 'handle.cpp',
         src_dir / 'logger.cpp',
         src_dir / 'server_config.cpp',
+        src_dir / 'parse_url.cpp'
     ),
     include_directories: include_directories(inc_dir),
    install: true,

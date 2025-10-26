@@ -4,6 +4,7 @@
 #include "../include/handle.h"
 #include "../include/buffer_pool.h"
 #include "../include/common/socket_ctx.h"
+#include "../include/parse_url.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -36,7 +37,7 @@ int create_listen_socket(int port)
 int main(int argc, char *argv[])
 {
 
-    Logger::setLogLevel(LogLevel::INFO);
+    Logger::setLogLevel(LogLevel::DEBUG);
 
     struct option long_options[] =
         {
@@ -44,12 +45,13 @@ int main(int argc, char *argv[])
             {"enable-nat", no_argument, nullptr, 'n'},
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
+            {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nr:u:j:", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -64,6 +66,9 @@ int main(int argc, char *argv[])
             break;
         case 'u':
             ServerConfig::setUdpPacketSize(std::atoi(optarg));
+            break;
+        case 'j':
+            ServerConfig::setJsonPath(optarg);
             break;
         case 0:
             if (strcmp(long_options[opt].name, "set-stun-port") == 0)
@@ -80,6 +85,8 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+
+    ParseURL::load_json(ServerConfig::getJsonPath());
 
     EpollLoop loop;
     BufferPool pool(ServerConfig::getUdpPacketSize(), ServerConfig::getRtpBufferSize());

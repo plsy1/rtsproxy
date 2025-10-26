@@ -4,23 +4,15 @@
 #include "../include/rtsp_client.h"
 #include "../include/buffer_pool.h"
 #include "../include/common/rtsp_client.h"
+#include "../include/parse_url.h"
 #include <unistd.h>
-#include <arpa/inet.h> 
-
-bool parse_http_url(const std::string &url, std::string &host, int &port, std::string &path)
-{
-    if (url.find("/rtp/") != 0)
-        return false;
-    std::string s = url.substr(5);
-    size_t colon = s.find(':');
-    size_t slash = s.find('/');
-    if (colon == std::string::npos || slash == std::string::npos)
-        return false;
-    host = s.substr(0, colon);
-    port = std::stoi(s.substr(colon + 1, slash - colon - 1));
-    path = s.substr(slash + 1);
-    return true;
-}
+#include <arpa/inet.h>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <regex>
+#include <iostream>
 
 void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop, BufferPool &pool)
 {
@@ -63,7 +55,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     std::string host, path;
     int port;
-    if (!parse_http_url(url, host, port, path))
+    if (!ParseURL::parse_http_url(url, host, port, path))
     {
 
         Logger::error(std::string("Failed to parse http url: ") + url);
