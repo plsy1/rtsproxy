@@ -8,6 +8,37 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
+std::vector<std::string> ParseURL::split(const std::string &str, char delimiter)
+{
+    std::vector<std::string> tokens;
+    size_t start = 0;
+    size_t end = str.find(delimiter);
+
+    while (end != std::string::npos)
+    {
+        tokens.push_back(str.substr(start, end - start));
+        start = end + 1;
+        end = str.find(delimiter, start);
+    }
+    tokens.push_back(str.substr(start, end));
+
+    return tokens;
+}
+
+std::string ParseURL::join(const std::vector<std::string> &parts, const std::string &delimiter)
+{
+    std::string result;
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+        if (i != 0)
+        {
+            result += delimiter;
+        }
+        result += parts[i];
+    }
+    return result;
+}
+
 using json = nlohmann::json;
 
 bool ParseURL::jsonLoaded = false;
@@ -117,13 +148,38 @@ bool ParseURL::parse_rtp_url(const std::string &url, std::string &host, int &por
 
 bool ParseURL::parse_http_url(const std::string &url, std::string &host, int &port, std::string &path)
 {
-    if (url.find("/rtp/") == 0)
+    std::string clean_url = url;
+    size_t qpos = clean_url.find('?');
+
+    if (qpos != std::string::npos)
     {
-        return parse_rtp_url(url, host, port, path);
+        std::string query_str = clean_url.substr(qpos + 1);
+        clean_url = clean_url.substr(0, qpos);
+
+        std::vector<std::string> params = split(query_str, '&');
+        std::vector<std::string> filtered_params;
+
+        for (const auto &param : params)
+        {
+            if (param.find("token=") != 0)
+            {
+                filtered_params.push_back(param);
+            }
+        }
+
+        if (!filtered_params.empty())
+        {
+            clean_url += "?" + join(filtered_params, "&");
+        }
     }
-    else if (url.find("/tv/") == 0)
+
+    if (clean_url.find("/rtp/") == 0)
     {
-        return parse_tv_url(url, host, port, path);
+        return parse_rtp_url(clean_url, host, port, path);
+    }
+    else if (clean_url.find("/tv/") == 0)
+    {
+        return parse_tv_url(clean_url, host, port, path);
     }
 
     return false;

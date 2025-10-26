@@ -37,7 +37,7 @@ int create_listen_socket(int port)
 int main(int argc, char *argv[])
 {
 
-    Logger::setLogLevel(LogLevel::DEBUG);
+    Logger::setLogLevel(LogLevel::INFO);
 
     struct option long_options[] =
         {

@@ -83,13 +83,13 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     if (qpos != std::string::npos)
     {
         std::string query_str = url.substr(qpos + 1);
-        url = url.substr(0, qpos);
         auto params = parse_query_params(query_str);
         auto it = params.find("token");
 
         if (it != params.end())
         {
             token = it->second;
+                        Logger::debug(token);
         }
     }
 
