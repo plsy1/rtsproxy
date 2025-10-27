@@ -1,0 +1,9 @@
+services:
+  rtsproxy:
+    image: plsy1/rtsproxy
+    container_name: rtsproxy
+    ports:
+      - 8554:8554
+    restart: always
+    # command: "--enable-nat"
+    # network_mode: host

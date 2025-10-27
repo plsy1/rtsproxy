@@ -1,0 +1,107 @@
+name: Build
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: arm64
+            cpu_family: aarch64
+            cpu: aarch64
+            tool: aarch64-unknown-linux-musl
+            docker_platforms: linux/arm64
+          - name: x86_64
+            cpu_family: x86_64
+            cpu: x86_64
+            tool: x86_64-unknown-linux-musl
+            docker_platforms: linux/amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: true
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y ninja-build meson
+
+      - name: Download and setup musl-cross toolchain
+        run: |
+          sudo mkdir -p /opt/x-tools
+          wget https://github.com/cross-tools/musl-cross/releases/download/20250929/${{ matrix.tool }}.tar.xz
+          sudo tar xf ${{ matrix.tool }}.tar.xz -C /opt/x-tools
+
+      - name: Set up meson crossfile for musl
+        run: |
+          echo '[host_machine]' > musl-crossfile-${{ matrix.name }}.ini
+          echo "system = 'linux'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "cpu_family = '${{ matrix.cpu_family }}'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "cpu = '${{ matrix.cpu }}'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "endian = 'little'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo '' >> musl-crossfile-${{ matrix.name }}.ini
+          echo '[binaries]' >> musl-crossfile-${{ matrix.name }}.ini
+          echo "cpp = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-g++'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "ar = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-ar'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "as = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-as'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "ld = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-ld'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "nm = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-nm'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "objcopy = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-objcopy'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "objdump = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-objdump'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "ranlib = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-ranlib'" >> musl-crossfile-${{ matrix.name }}.ini
+          echo "strip = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-strip'" >> musl-crossfile-${{ matrix.name }}.ini
+
+      - name: Build ${{ matrix.name }}
+        run: |
+          rm -rf builddir
+          meson setup builddir --cross-file=musl-crossfile-${{ matrix.name }}.ini --strip --buildtype=release -Disstatic=true
+          meson compile -C builddir -j$(nproc)
+          meson install -C builddir
+          cp bin/rtsproxy "${{ github.workspace }}/rtsproxy"
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          file: ./dockerfile
+          context: .
+          push: true
+          platforms: ${{ matrix.docker_platforms }}
+          tags: |
+            plsy1/rtsproxy:${{ github.event.release.tag_name || github.sha }}-${{ matrix.name }}
+            plsy1/rtsproxy:latest-${{ matrix.name }}
+          cache-from: type=registry,ref=plsy1/rtsproxy:buildcache
+          cache-to: type=registry,ref=plsy1/rtsproxy:buildcache,mode=max
+
+  docker-manifest:
+    runs-on: ubuntu-latest
+    needs: [linux]
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Create multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            --tag plsy1/rtsproxy:latest \
+            plsy1/rtsproxy:latest-x86_64 \
+            plsy1/rtsproxy:latest-arm64
