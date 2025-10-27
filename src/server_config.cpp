@@ -7,7 +7,7 @@ int ServerConfig::rtp_buffer_size = 4096;
 int ServerConfig::udp_packet_size = 1500;
 int ServerConfig::stun_server_port = 19302;
 std::string ServerConfig::stun_server_host = "stun.l.google.com";
-std::string ServerConfig::json_path = "iptv.json";
+std::string ServerConfig::json_path = "config.json";
 std::string ServerConfig::auth_token = "";
 
 void ServerConfig::setPort(int p)

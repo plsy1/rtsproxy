@@ -39,9 +39,9 @@ std::map<std::string, std::string> parse_query_params(const std::string &query)
     return params;
 }
 
-void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop* loop, BufferPool& pool)
+void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop, BufferPool &pool)
 {
-    if (client_fd < 0) 
+    if (client_fd < 0)
     {
         Logger::error("Received request on invalid file descriptor");
         return;
@@ -49,7 +49,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop* loop
 
     char buf[4096];
     ssize_t n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-    
+
     if (n == 0)
     {
         Logger::debug("Client disconnected gracefully (EOF).");
@@ -58,7 +58,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop* loop
     }
     else if (n < 0)
     {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) 
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
             Logger::debug("No data available yet, will retry later.");
             return;
@@ -120,17 +120,15 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop* loop
         }
     }
 
-    std::string host, path;
-    int port;
-    if (!ParseURL::parse_http_url(url, host, port, path))
+    std::string rtsp_url;
+
+    if (!ParseURL::parse_http_url(url, rtsp_url))
     {
 
         Logger::error(std::string("Failed to parse http url: ") + url);
         close(client_fd);
         return;
     }
-
-    std::string rtsp_url = "rtsp://" + host + ":" + std::to_string(port) + "/" + path;
 
     std::string client_host = std::string(std::string(inet_ntoa(client_addr.sin_addr)) + ":" +
                                           std::to_string(ntohs(client_addr.sin_port)));

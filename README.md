@@ -1,4 +1,5 @@
 # rtsproxy
+
 一款具有 NAT 穿越功能的 RTSP 代理工具。
 
 ## 使用说明
@@ -19,27 +20,47 @@ rtsproxy：`http://192.168.0.3:8554`
 
 ### /tv
 
-用于将回放地址与直播地址的 URI 统一，以便在某些不支持 m3u catchup 参数的播放器看回放，一般来说，回放与直播地址不同的，query 参数为`?tvdr={utc:YmdHMS}GMT-{utcend:YmdHMS}GMT"`，所以只处理了这种情况。
+用于将回放地址与直播地址的 URI 统一，以便在某些不支持 m3u catchup 参数的播放器看回放。
 
-实现方式是，通过指定的 JSON 文件，映射 channelID 到实际播放地址，例如：
+使用正则将客户端发来的地址替换为正确的回看地址，再去请求上游。
 
-rtsproxy：`http://192.168.0.3:8554`
+需要手动配置 JSON 文件替换规则，例如：
 
-要代理的目标频道 ID：`ch123456789`
-
-访问代理地址：`http://192.168.0.3:8554/tv/ch1234566789`
-
-配置 JSON 映射文件格式:
+将`rtsp://a.b.c.d:554/iptv/import/Tvod/iptv/001/001/channelName.rsc/abcde_Uni.sdp?tvdr=yyyyMMddHHmmss-yyyyMMddHHmmss`替换为`rtsp://a.b.c.d:554/iptv/Tvod/iptv/001/001/channelName.rsc?tvdr=yyyyMMddHHmmssGMT-yyyyMMddHHmmssGMT`，配置如下：
 
 ```json
-[
-  {
-    "ChannelID": "ch123456789",
-    "uni_live": "rtsp://a.b.c.d:554",
-    "uni_playback": "rtsp://a.b.c.d:554?tvdr={utc:YmdHMS}GMT-{utcend:YmdHMS}GMT"
-  }
-]
+{
+  "replace_templates": [
+    {
+      "action": "remove",
+      "match": "/{number}_Uni.sdp",
+      "description": "删除冗余字段"
+    },
+    {
+      "action": "replace",
+      "match": "/iptv/import",
+      "replacement": "/iptv",
+      "description": "替换 /iptv/import 为 /iptv"
+    },
+    {
+      "action": "replace",
+      "match": "tvdr={number}-{number}",
+      "replacement": "tvdr={number}GMT-{number}GMT",
+      "description": "补全回看地址"
+    },
+    {
+      "action": "timeshift",
+      "match": "tvdr={number}GMT-{number}GMT",
+      "shift_hours": -8,
+      "description": "将时间区间前移8小时"
+    }
+  ]
+}
 ```
+
+action 支持 remove、replace、timeshift，应该能覆盖各种场景（?）
+
+match 可以写 {number} {word} {any}，避免手动写正则
 
 ## 命令行参数
 
@@ -54,5 +75,4 @@ Options:
       --set-stun-host,  <port>  Set STUN server host (default: stun.l.google.com)
       --set-stun-port,  <port>  Set STUN server port (default: 19302)
 ```
-
 
