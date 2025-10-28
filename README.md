@@ -72,7 +72,10 @@ Options:
   -u, --udp-packet-size <size>  Set UDP packet size (default: 1500)
   -t, --set-auth-token  <token> Set auth token (default: no auth required)
   -j, --set-json-path   <path>  Set JSON file path (default: iptv.json)
+  -d, --daemon                  Run rtsproxy in the background
+  -k, --kill                    Kill the running rtsproxy instance
       --set-stun-host,  <port>  Set STUN server host (default: stun.l.google.com)
       --set-stun-port,  <port>  Set STUN server port (default: 19302)
+
 ```
 

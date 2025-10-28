@@ -1,5 +1,10 @@
 #include "../include/server_config.h"
+#include "../include/logger.h"
 #include <iostream>
+#include <signal.h>
+#include <dirent.h>
+#include <fstream>
+#include <unistd.h>
 
 int ServerConfig::port = 8554;
 bool ServerConfig::enable_nat = false;
@@ -18,6 +23,7 @@ void ServerConfig::setPort(int p)
 void ServerConfig::enableNat()
 {
     enable_nat = true;
+    Logger::info("[CONFIG] NAT traversal enabled");
 }
 
 void ServerConfig::setRtpBufferSize(int size)
@@ -100,6 +106,45 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
     std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;
     std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
+    std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
+    std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
     std::cout << "      --set-stun-host,  <port>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
     std::cout << "      --set-stun-port,  <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
+}
+
+void ServerConfig::kill_previous_instance()
+{
+    pid_t current_pid = getpid();
+
+    DIR *dir = opendir("/proc");
+    if (!dir)
+    {
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr)
+    {
+        if (entry->d_type == DT_DIR && isdigit(entry->d_name[0]))
+        {
+            pid_t pid = atoi(entry->d_name);
+            if (pid == current_pid)
+                continue;
+
+            std::string cmdline_path = "/proc/" + std::to_string(pid) + "/cmdline";
+            std::ifstream cmdline_file(cmdline_path);
+            if (cmdline_file)
+            {
+                std::string cmdline;
+                std::getline(cmdline_file, cmdline);
+
+                if (cmdline.find("rtsproxy") != std::string::npos)
+                {
+                    kill(pid, SIGTERM);
+                    break;
+                }
+            }
+        }
+    }
+    closedir(dir);
 }

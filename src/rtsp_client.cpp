@@ -31,7 +31,6 @@ RTSPClient::RTSPClient(const RTSPClientCtx &info, EpollLoop *loop, BufferPool &p
     if (ServerConfig::isNatEnabled() == true)
     {
         StunClient::send_stun_mapping_request(rtp_fd_);
-        Logger::debug("Nat punching request send success.");
     }
     else
     {
@@ -153,7 +152,7 @@ bool RTSPClient::connect_server()
     int res = connect(sockfd_, (struct sockaddr *)&addr, sizeof(addr));
     if (res < 0 && errno != EINPROGRESS)
     {
-        Logger::error("Connect to upstream failed.");
+        Logger::error("[RTSP] Connect to upstream failed.");
         close(sockfd_);
         sockfd_ = -1;
         return false;
@@ -226,12 +225,12 @@ void RTSPClient::on_tcp_control_writable()
         socklen_t len = sizeof(err);
         if (getsockopt(sockfd_, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0)
         {
-            Logger::error("Connect to upstream failed.");
+            Logger::error("[RTSP] Connect to upstream failed.");
             if (on_closed_callback_)
                 on_closed_callback_();
             return;
         }
-        Logger::info("Connection to upstream established.");
+        Logger::info("[RTSP] Connection to upstream established.");
         state_ = RtspState::IDLE;
         return;
     }
@@ -249,7 +248,7 @@ void RTSPClient::on_tcp_control_writable()
     }
     else
     {
-        Logger::error("RTSP control message send failed.");
+        Logger::error("[RTSP] RTSP control message send failed.");
         if (on_closed_callback_)
             on_closed_callback_();
         return;
@@ -273,7 +272,7 @@ void RTSPClient::on_tcp_control_readable()
         }
         else if (n == 0)
         {
-            Logger::info("Server closed connection");
+            Logger::info("[RTSP] Server closed connection");
             close(sockfd_);
             sockfd_ = -1;
             state_ = RtspState::DISCONNECTED;
@@ -285,7 +284,7 @@ void RTSPClient::on_tcp_control_readable()
         }
         else
         {
-            Logger::error("recv failed");
+            Logger::warn("[RTSP] Receive failed");
             break;
         }
     }
@@ -374,6 +373,11 @@ void RTSPClient::process_response(const std::string &resp)
                 << (nat_wan_port ? (nat_wan_port + 1) : (client_rtp_port_ + 1))
                 << "\r\n";
             std::string header = oss.str();
+            Logger::info(
+                std::string("[RTSP] SETUP with client port: " +
+                            std::to_string((nat_wan_port ? nat_wan_port : client_rtp_port_)) +
+                            "-" +
+                            std::to_string((nat_wan_port ? (nat_wan_port + 1) : (client_rtp_port_ + 1)))));
             push_request_into_queue("SETUP", header, "");
         }
         else if (current_request_.method == "SETUP")
@@ -387,8 +391,8 @@ void RTSPClient::process_response(const std::string &resp)
                 send_rtp_trigger(); // public ip environment needed only, don't do this in nat environment
             }
 
-            Logger::debug(
-                std::string("Setup done, ready to PLAY, server port: " +
+            Logger::info(
+                std::string("[RTSP] SETUP done, ready to PLAY, server port: " +
                             std::to_string(server_rtp_port_) + "-" +
                             std::to_string(server_rtcp_port_)));
 
@@ -400,7 +404,7 @@ void RTSPClient::process_response(const std::string &resp)
         }
         else if (current_request_.method == "PLAY")
         {
-            Logger::info(std::string("Streaming Start:" + rtsp_url + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" +
+            Logger::info(std::string("[RTSP] Streaming Start: " + rtsp_url + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" +
                                      std::to_string(ntohs(client_addr_.sin_port))
 
                                          ));
@@ -413,7 +417,7 @@ void RTSPClient::process_response(const std::string &resp)
     }
     else
     {
-        Logger::error("Error: " + code);
+        Logger::error("[RTSP] Connection to upstream refused. Please verify if the URL is correct.");
         state_ = RtspState::IDLE;
     }
 }
@@ -546,7 +550,10 @@ void RTSPClient::on_rtp_control_readable()
     {
         if (ServerConfig::isNatEnabled() == true)
         {
-            StunClient::extract_stun_mapping_from_response(buf.get(), recv_len, nat_wan_ip, nat_wan_port);
+            if (StunClient::extract_stun_mapping_from_response(buf.get(), recv_len, nat_wan_ip, nat_wan_port) == 0)
+            {
+                Logger::info("[RTP] Extract STUN mapping success: " + nat_wan_ip + ":" + std::to_string(nat_wan_port));
+            };
             loop->set(rtp_ctx_, rtp_fd_, EPOLLIN);
         }
         buffer_pool_.release(std::move(buf));
@@ -624,11 +631,11 @@ void RTSPClient::send_rtp_trigger()
                        (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
     if (n < 0)
     {
-        Logger::error("send_rtp_trigger failed");
+        Logger::error("[RTP] Trigger send failed");
     }
     else
     {
-        // Logger::debug("[RTP] Trigger sent");
+        Logger::debug("[RTP] Trigger sent");
     }
 }
 
@@ -647,7 +654,7 @@ bool RTSPClient::start_getparameter_timer()
     timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (timer_fd < 0)
     {
-        Logger::error("timerfd_create failed");
+        Logger::error("[RTP] Keepalive timer create failed");
         return false;
     }
 
@@ -659,7 +666,7 @@ bool RTSPClient::start_getparameter_timer()
 
     if (timerfd_settime(timer_fd, 0, &its, nullptr) < 0)
     {
-        Logger::error("timerfd_settime failed");
+        Logger::error("[RTP] Keepalive timer  settime failed");
         close(timer_fd);
         timer_fd = -1;
         return false;
@@ -714,7 +721,7 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
     {
         if (payloadstart + 4 > recv_len)
         {
-            Logger::error("Malformed RTP packet: extension header truncated");
+            Logger::warn("[RTP] Malformed RTP packet: extension header truncated");
             return false;
         }
 
@@ -733,7 +740,7 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
 
     if (payload_len <= 0 || payloadstart + payload_len > recv_len)
     {
-        Logger::error("Malformed RTP packet: invalid payload length");
+        Logger::warn("[RTP] Malformed RTP packet: invalid payload length");
         return false;
     }
 

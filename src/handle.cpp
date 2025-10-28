@@ -43,7 +43,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 {
     if (client_fd < 0)
     {
-        Logger::error("Received request on invalid file descriptor");
+        Logger::error("[SERVER] Received request on invalid file descriptor");
         return;
     }
 
@@ -52,7 +52,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     if (n == 0)
     {
-        Logger::debug("Client disconnected gracefully (EOF).");
+        Logger::debug("[SERVER] Client disconnected gracefully (EOF).");
         close(client_fd);
         return;
     }
@@ -60,17 +60,17 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
-            Logger::debug("No data available yet, will retry later.");
+            Logger::debug("[SERVER] No data available yet, will retry later.");
             return;
         }
         else if (errno == EBADF)
         {
-            Logger::error("Received data from an invalid file descriptor.");
+            Logger::error("[SERVER] Received data from an invalid file descriptor.");
             return;
         }
         else
         {
-            Logger::error("Client request receive failed: " + std::string(strerror(errno)));
+            Logger::error("[SERVER] Client request receive failed: " + std::string(strerror(errno)));
             close(client_fd);
             return;
         }
@@ -107,14 +107,14 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     {
         if (token.empty())
         {
-            Logger::debug("Token missing in request");
+            Logger::debug("[SERVER] Token missing in request");
             send_unauthorized(client_fd);
             return;
         }
 
         if (token != ServerConfig::getToken())
         {
-            Logger::debug("Invalid token");
+            Logger::debug("[SERVER] Invalid token");
             send_unauthorized(client_fd);
             return;
         }
@@ -125,7 +125,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     if (!ParseURL::parse_http_url(url, rtsp_url))
     {
 
-        Logger::error(std::string("Failed to parse http url: ") + url);
+        Logger::error(std::string("[SERVER] Failed to parse http url: ") + url);
         close(client_fd);
         return;
     }
@@ -133,7 +133,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
     std::string client_host = std::string(std::string(inet_ntoa(client_addr.sin_addr)) + ":" +
                                           std::to_string(ntohs(client_addr.sin_port)));
 
-    Logger::info("New http client request: " + client_host + " -> " + rtsp_url);
+    Logger::info("[SERVER] New http client request: " + client_host + " -> " + rtsp_url);
 
     RTSPClientCtx info{
         .rtsp_url = rtsp_url,
@@ -144,7 +144,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     client->set_on_closed_callback([client, client_host, loop]()
                                    {
-    Logger::info("Client disconnect: " + client_host);
+    Logger::info("[SERVER] Client disconnect: " + client_host);
     loop->add_task([client]()
                 {delete client;}
                                 ); });

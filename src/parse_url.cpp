@@ -135,7 +135,7 @@ bool ParseURL::load_json(const std::string jsonPath)
     std::ifstream ifs(jsonPath);
     if (!ifs.is_open())
     {
-        Logger::debug("Failed to open json file.");
+        Logger::warn("[SERVER] Failed to open rewrite file.");
         return false;
     }
 
@@ -211,7 +211,7 @@ bool ParseURL::parse_tv_url(const std::string &url, std::string &rtsp_url)
         rtsp_url = replaced_url.substr(4);
         rtsp_url = "rtsp://" + rtsp_url;
 
-        Logger::debug(std::string("Playback redirect to: " + rtsp_url));
+        Logger::info("[SERVER] Playback address rewritten to: " + rtsp_url);
         return true;
     }
 }

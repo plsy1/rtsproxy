@@ -23,6 +23,7 @@ public:
     static std::string getToken();
     static void printUsage(const std::string &program_name);
 
+    static void kill_previous_instance();
 private:
     static int port;
     static bool enable_nat;

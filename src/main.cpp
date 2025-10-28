@@ -37,7 +37,7 @@ int create_listen_socket(int port)
 int main(int argc, char *argv[])
 {
 
-    Logger::setLogLevel(LogLevel::INFO);
+    Logger::setLogLevel(LogLevel::ERROR);
 
     struct option long_options[] =
         {
@@ -49,10 +49,12 @@ int main(int argc, char *argv[])
             {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
+            {"kill", no_argument, nullptr, 'k'},
+            {"daemon", no_argument, nullptr, 'd'},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:kd", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -73,6 +75,17 @@ int main(int argc, char *argv[])
             break;
         case 'j':
             ServerConfig::setJsonPath(optarg);
+            break;
+        case 'k':
+            ServerConfig::kill_previous_instance();
+            return 0;
+        case 'd':
+            if (daemon(0, 0) == -1)
+            {
+                Logger::error("[SERVER] Failed to daemonize the process");
+                return -1;
+            }
+            Logger::info("[SERVER] Running in daemon mode");
             break;
         case 0:
             if (strcmp(long_options[opt].name, "set-stun-port") == 0)
@@ -114,7 +127,7 @@ int main(int argc, char *argv[])
             {
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
                     break;
-                Logger::error("accept failed: " + std::string(strerror(errno)));
+                Logger::error("[SERVER] Accept client request failed: " + std::string(strerror(errno)));
                 break;
             }
             fcntl(client_fd, F_SETFL, O_NONBLOCK);
@@ -126,12 +139,12 @@ int main(int argc, char *argv[])
                 [[maybe_unused]] uint32_t unused_events = e;
                 if (ctx->fd >= 0)
                 {
-                    Logger::debug("Handling request for client_fd: " + std::to_string(ctx->fd));
+                    Logger::debug("[SERVER] Handling request for client_fd: " + std::to_string(ctx->fd));
                     handle_http_request(ctx->fd, client_addr, &loop, pool);
                 }
                 else
                 {
-                    Logger::error("Invalid client_fd, cannot handle request");
+                    Logger::error("[SERVER] Invalid client_fd, cannot handle request");
                 }
             };
 
@@ -144,7 +157,7 @@ int main(int argc, char *argv[])
     listen_ctx->handler = accept_handler;
     loop.set(listen_ctx.get(), listen_fd, EPOLLIN);
 
-    Logger::info("HTTP server listening on port " + std::to_string(listen_port));
+    Logger::info("[SERVER] HTTP server listening on port " + std::to_string(listen_port));
     loop.loop();
 
     return 0;
