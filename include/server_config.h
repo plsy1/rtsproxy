@@ -13,8 +13,9 @@ public:
     static void setStunHost(std::string host);
     static void setJsonPath(std::string path);
     static void setToken(std::string token);
-    static int getPort();
+    
     static bool isNatEnabled();
+    static int getPort();
     static int getRtpBufferSize();
     static int getUdpPacketSize();
     static int getStunPort();
@@ -24,6 +25,7 @@ public:
     static void printUsage(const std::string &program_name);
 
     static void kill_previous_instance();
+
 private:
     static int port;
     static bool enable_nat;

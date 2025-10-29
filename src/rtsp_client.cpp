@@ -3,7 +3,6 @@
 #include "../include/logger.h"
 #include "../include/server_config.h"
 #include "../include/buffer_pool.h"
-#include "../include/common/rtsp_client.h"
 #include "../include/common/socket_ctx.h"
 #include "../include/stun_client.h"
 #include "../include/utils.h"
@@ -17,14 +16,15 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 
-RTSPClient::RTSPClient(const RTSPClientCtx &info, EpollLoop *loop, BufferPool &pool)
+RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const std::string &rtsp_url)
     : loop(loop),
-      client_fd_(info.client_fd),
-      client_addr_(info.client_addr),
-      rtsp_url(info.rtsp_url),
-      buffer_pool_(pool)
+      buffer_pool_(pool),
+      client_addr_(client_addr),
+      client_fd_(client_fd),
+      rtsp_url_(rtsp_url)
+
 {
-    parse_url(info.rtsp_url);
+    parse_url(rtsp_url_);
     init_client_fd();
     client_rtp_port_ = get_random_rtp_port();
     init_rtp_rtcp_sockets();
@@ -83,10 +83,10 @@ RTSPClient::~RTSPClient()
         loop->remove(client_fd_);
         close(client_fd_);
     }
-    if (sockfd_ >= 0)
+    if (rtsp_fd_ >= 0)
     {
-        loop->remove(sockfd_);
-        close(sockfd_);
+        loop->remove(rtsp_fd_);
+        close(rtsp_fd_);
     }
     if (rtp_fd_ >= 0)
     {
@@ -123,12 +123,12 @@ void RTSPClient::parse_url(const std::string &url)
     if (colon != std::string::npos)
     {
         server_ip_ = hostport.substr(0, colon);
-        server_port_ = std::stoi(hostport.substr(colon + 1));
+        server_rtsp_port_ = std::stoi(hostport.substr(colon + 1));
     }
     else
     {
         server_ip_ = hostport;
-        server_port_ = 554;
+        server_rtsp_port_ = 554;
     }
 
     path_ = (slash != std::string::npos) ? url.substr(slash) : "/";
@@ -136,25 +136,25 @@ void RTSPClient::parse_url(const std::string &url)
 
 bool RTSPClient::connect_server()
 {
-    sockfd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd_ < 0)
+    rtsp_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (rtsp_fd_ < 0)
         return false;
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(server_port_);
+    addr.sin_port = htons(server_rtsp_port_);
     inet_pton(AF_INET, server_ip_.c_str(), &addr.sin_addr);
 
-    fcntl(sockfd_, F_SETFL, O_NONBLOCK);
+    fcntl(rtsp_fd_, F_SETFL, O_NONBLOCK);
 
-    sock_ctx_ = new SocketCtx{sockfd_, std::bind(&RTSPClient::handle_tcp_control, this, std::placeholders::_1)};
+    sock_ctx_ = new SocketCtx{rtsp_fd_, std::bind(&RTSPClient::handle_tcp_control, this, std::placeholders::_1)};
 
-    int res = connect(sockfd_, (struct sockaddr *)&addr, sizeof(addr));
+    int res = connect(rtsp_fd_, (struct sockaddr *)&addr, sizeof(addr));
     if (res < 0 && errno != EINPROGRESS)
     {
         Logger::error("[RTSP] Connect to upstream failed.");
-        close(sockfd_);
-        sockfd_ = -1;
+        close(rtsp_fd_);
+        rtsp_fd_ = -1;
         return false;
     }
     register_sockets_to_epoll(sock_ctx_, EPOLLOUT);
@@ -223,7 +223,7 @@ void RTSPClient::on_tcp_control_writable()
     {
         int err = 0;
         socklen_t len = sizeof(err);
-        if (getsockopt(sockfd_, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0)
+        if (getsockopt(rtsp_fd_, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0)
         {
             Logger::error("[RTSP] Connect to upstream failed.");
             if (on_closed_callback_)
@@ -235,14 +235,14 @@ void RTSPClient::on_tcp_control_writable()
         return;
     }
 
-    ssize_t n = send(sockfd_, req_buf_.data() + tcp_send_offset_,
+    ssize_t n = send(rtsp_fd_, req_buf_.data() + tcp_send_offset_,
                      req_buf_.size() - tcp_send_offset_, 0);
     if (n > 0)
     {
         tcp_send_offset_ += n;
         if (tcp_send_offset_ == req_buf_.size())
         {
-            loop->set(sock_ctx_, sockfd_, EPOLLIN);
+            loop->set(sock_ctx_, rtsp_fd_, EPOLLIN);
             tcp_send_offset_ = 0;
         }
     }
@@ -260,7 +260,7 @@ void RTSPClient::on_tcp_control_readable()
     char buf[2048];
     while (true)
     {
-        ssize_t n = recv(sockfd_, buf, sizeof(buf), 0);
+        ssize_t n = recv(rtsp_fd_, buf, sizeof(buf), 0);
         if (n > 0)
         {
             resp_buf_.append(buf, n);
@@ -273,8 +273,8 @@ void RTSPClient::on_tcp_control_readable()
         else if (n == 0)
         {
             Logger::info("[RTSP] Server closed connection");
-            close(sockfd_);
-            sockfd_ = -1;
+            close(rtsp_fd_);
+            rtsp_fd_ = -1;
             state_ = RtspState::DISCONNECTED;
             break;
         }
@@ -319,7 +319,7 @@ void RTSPClient::build_and_send_request()
             req_buf_ += "\r\n";
 
         tcp_send_offset_ = 0;
-        loop->set(sock_ctx_, sockfd_, EPOLLOUT);
+        loop->set(sock_ctx_, rtsp_fd_, EPOLLOUT);
     }
 }
 
@@ -363,7 +363,7 @@ void RTSPClient::process_response(const std::string &resp)
                     track_ = t;
                 else
                     track_ = "rtsp://" + server_ip_ + ":" +
-                             std::to_string(server_port_) + path_ + "/" + t;
+                             std::to_string(server_rtsp_port_) + path_ + "/" + t;
             }
 
             std::ostringstream oss;
@@ -404,7 +404,7 @@ void RTSPClient::process_response(const std::string &resp)
         }
         else if (current_request_.method == "PLAY")
         {
-            Logger::info(std::string("[RTSP] Streaming Start: " + rtsp_url + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" +
+            Logger::info(std::string("[RTSP] Streaming Start: " + rtsp_url_ + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" +
                                      std::to_string(ntohs(client_addr_.sin_port))
 
                                          ));
@@ -425,8 +425,8 @@ void RTSPClient::process_response(const std::string &resp)
 std::string RTSPClient::build_uri_for_method(const std::string &method) const
 {
     if (method == "SETUP")
-        return "rtsp://" + server_ip_ + ":" + std::to_string(server_port_) + path_ + track_;
-    return "rtsp://" + server_ip_ + ":" + std::to_string(server_port_) + path_;
+        return "rtsp://" + server_ip_ + ":" + std::to_string(server_rtsp_port_) + path_ + track_;
+    return "rtsp://" + server_ip_ + ":" + std::to_string(server_rtsp_port_) + path_;
 }
 
 std::vector<std::string> RTSPClient::parse_sdp_tracks(const std::string &sdp)

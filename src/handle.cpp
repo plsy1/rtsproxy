@@ -3,7 +3,6 @@
 #include "../include/epoll_loop.h"
 #include "../include/rtsp_client.h"
 #include "../include/buffer_pool.h"
-#include "../include/common/rtsp_client.h"
 #include "../include/parse_url.h"
 #include "../include/server_config.h"
 #include <unistd.h>
@@ -135,12 +134,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     Logger::info("[SERVER] New http client request: " + client_host + " -> " + rtsp_url);
 
-    RTSPClientCtx info{
-        .rtsp_url = rtsp_url,
-        .client_fd = client_fd,
-        .client_addr = client_addr};
-
-    RTSPClient *client = new RTSPClient(info, loop, pool);
+    RTSPClient *client = new RTSPClient(loop, pool, client_addr, client_fd, rtsp_url);
 
     client->set_on_closed_callback([client, client_host, loop]()
                                    {
