@@ -3,24 +3,42 @@
 #include "../include/logger.h"
 #include <fstream>
 #include <regex>
-#include <iostream>
-#include <sstream>
-#include <unistd.h>
-#include <arpa/inet.h>
+#include <vector>
+#include <ctime>
 
 using json = nlohmann::json;
 
-bool ParseURL::jsonLoaded = false;
 nlohmann::json ParseURL::parseConfig;
 
 std::string ParseURL::simplifyToRegex(const std::string &match_pattern)
 {
+
     std::string regex_pattern = match_pattern;
 
-    regex_pattern = std::regex_replace(regex_pattern, std::regex("\\{number\\}"), "(\\d+)");
-    regex_pattern = std::regex_replace(regex_pattern, std::regex("\\{word\\}"), "(\\w+)");
-    regex_pattern = std::regex_replace(regex_pattern, std::regex("\\{any\\}"), "(.*?)");
-    regex_pattern = std::regex_replace(regex_pattern, std::regex("\\/"), "\\/");
+    size_t pos = 0;
+    while ((pos = regex_pattern.find("{number}", pos)) != std::string::npos)
+    {
+        regex_pattern.replace(pos, 8, "(\\d+)");
+        pos += 6;
+    }
+    pos = 0;
+    while ((pos = regex_pattern.find("{word}", pos)) != std::string::npos)
+    {
+        regex_pattern.replace(pos, 7, "(\\w+)");
+        pos += 6;
+    }
+    pos = 0;
+    while ((pos = regex_pattern.find("{any}", pos)) != std::string::npos)
+    {
+        regex_pattern.replace(pos, 6, "(.*?)");
+        pos += 5;
+    }
+    pos = 0;
+    while ((pos = regex_pattern.find("/", pos)) != std::string::npos)
+    {
+        regex_pattern.replace(pos, 1, "\\/");
+        pos += 2;
+    }
 
     return regex_pattern;
 }
@@ -32,7 +50,7 @@ std::string ParseURL::shiftTime(const std::string &time_str, int shift_hours)
         struct tm timeinfo = {};
         if (strptime(time_str.c_str(), "%Y%m%d%H%M%S", &timeinfo) == nullptr)
         {
-            throw std::invalid_argument("Failed to parse time in yyyyMMddHHmmss format");
+            return time_str;
         }
 
         time_t time_epoch = mktime(&timeinfo);
@@ -55,47 +73,38 @@ std::string ParseURL::shiftTime(const std::string &time_str, int shift_hours)
     }
     else
     {
-        throw std::invalid_argument("Unsupported time format");
+        return time_str;
     }
 }
 
 void ParseURL::shiftTimeInString(std::string &input, const std::string &regex_pattern, int shift_hours)
 {
-    try
+
+    std::regex rgx(regex_pattern);
+    std::smatch match;
+
+    if (!regex_search(input, match, rgx))
+        return;
+
+    std::string start_time = match[1];
+    std::string end_time = match[2];
+
+    std::string new_start_time = shiftTime(start_time, shift_hours);
+    std::string new_end_time = shiftTime(end_time, shift_hours);
+
+    std::string replaced = match[0];
+    size_t pos1 = replaced.find(start_time);
+    if (pos1 != std::string::npos)
     {
-        std::regex rgx(regex_pattern);
-        std::smatch match;
-
-        if (regex_search(input, match, rgx))
-        {
-            std::string start_time = match[1];
-            std::string end_time = match[2];
-
-            std::string new_start_time = shiftTime(start_time, shift_hours);
-            std::string new_end_time = shiftTime(end_time, shift_hours);
-
-            std::string replaced = match[0];
-            size_t pos1 = replaced.find(start_time);
-            if (pos1 != std::string::npos)
-            {
-                replaced.replace(pos1, start_time.length(), new_start_time);
-            }
-            size_t pos2 = replaced.find(end_time, pos1 + new_start_time.length());
-            if (pos2 != std::string::npos)
-            {
-                replaced.replace(pos2, end_time.length(), new_end_time);
-            }
-
-            input.replace(match.position(0), match.length(0), replaced);
-        }
-        else
-        {
-        }
+        replaced.replace(pos1, start_time.length(), new_start_time);
     }
-    catch (const std::regex_error &e)
+    size_t pos2 = replaced.find(end_time, pos1 + new_start_time.length());
+    if (pos2 != std::string::npos)
     {
-        Logger::error(e.what());
+        replaced.replace(pos2, end_time.length(), new_end_time);
     }
+
+    input.replace(match.position(0), match.length(0), replaced);
 }
 
 std::vector<std::string> ParseURL::split(const std::string &str, char delimiter)
@@ -139,15 +148,8 @@ bool ParseURL::load_json(const std::string jsonPath)
         return false;
     }
 
-    try
-    {
-        ifs >> parseConfig;
-    }
-    catch (...)
-    {
-        return false;
-    }
-    jsonLoaded = true;
+    ifs >> parseConfig;
+
     return true;
 }
 

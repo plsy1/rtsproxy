@@ -227,6 +227,15 @@ jobs:
           path: release
           pattern: "rtsproxy-*"
           merge-multiple: true
+      - name: UPX compress binaries
+        run: |
+          sudo apt-get install -y upx
+          chmod +x release/rtsproxy-*
+          for file in release/rtsproxy-*; do
+          if [[ ! "$file" =~ \.tar\.xz$ ]]; then
+              upx "$file"
+          fi
+          done
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
