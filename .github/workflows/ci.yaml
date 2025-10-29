@@ -233,7 +233,7 @@ jobs:
           chmod +x release/rtsproxy-*
           for file in release/rtsproxy-*; do
           if [[ ! "$file" =~ \.tar\.xz$ ]]; then
-              upx "$file"
+              upx --best --lzma "$file"
           fi
           done
       - name: Upload release assets
