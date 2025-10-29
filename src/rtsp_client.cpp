@@ -385,12 +385,8 @@ void RTSPClient::process_response(const std::string &resp)
 
             parse_server_ports(resp);
             init_rtp_rtcp_server_addr();
-
-            if (ServerConfig::isNatEnabled() == false)
-            {
-                send_rtp_trigger(); // public ip environment needed only, don't do this in nat environment
-            }
-
+            send_rtp_trigger();
+            
             Logger::info(
                 std::string("[RTSP] SETUP done, ready to PLAY, server port: " +
                             std::to_string(server_rtp_port_) + "-" +
@@ -749,7 +745,7 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
     return true;
 }
 
-int RTSPClient::get_random_rtp_port()
+uint16_t RTSPClient::get_random_rtp_port()
 {
     static int initialized = 0;
     if (!initialized)

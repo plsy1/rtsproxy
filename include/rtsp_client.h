@@ -71,7 +71,7 @@ private:
     void on_timer_fd(uint32_t event);
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
-    int get_random_rtp_port();
+    uint16_t get_random_rtp_port();
 
     void on_tcp_control_writable();
     void on_tcp_control_readable();
