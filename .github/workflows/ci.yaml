@@ -69,90 +69,90 @@ jobs:
             tool: armv7-unknown-linux-musleabihf
             cpu_family: arm
             cpu: arm32v7hf
-          - name: i586
-            tool: i586-unknown-linux-musl
-            cpu_family: x86_64
-            cpu: i586
-          - name: i686
-            tool: i686-unknown-linux-musl
-            cpu_family: x86_64
-            cpu: i686
-          - name: loong64
-            tool: loongarch64-unknown-linux-musl
-            cpu_family: loongarch64
-            cpu: loongarch64
-          - name: m68k
-            tool: m68k-unknown-linux-musl
-            cpu_family: m68k
-            cpu: m68k
-          - name: microblazeel
-            tool: microblazeel-xilinx-linux-musl
-            cpu_family: microblazeel
-            cpu: microblazeel
-          - name: microblaze
-            tool: microblaze-xilinx-linux-musl
-            cpu_family: microblaze
-            cpu: microblaze
-          - name: mips64el
-            tool: mips64el-unknown-linux-musl
-            cpu_family: mips64
-            cpu: mips64el
-          - name: mips64
-            tool: mips64-unknown-linux-musl
-            cpu_family: mips64
-            cpu: mips64
-          - name: mips32el
-            tool: mipsel-unknown-linux-musl
-            cpu_family: mips64
-            cpu: mips32el
-          - name: mips32elsf
-            tool: mipsel-unknown-linux-muslsf
-            cpu_family: mips64
-            cpu: mips32elsf
-          - name: mips32
-            tool: mips-unknown-linux-musl
-            cpu_family: mips
-            cpu: mips
-          - name: mips32sf
-            tool: mips-unknown-linux-muslsf
-            cpu_family: mips
-            cpu: mips32sf
-          - name: or1k
-            tool: or1k-unknown-linux-musl
-            cpu_family: or1k
-            cpu: or1k
-          - name: powerpc64le
-            tool: powerpc64le-unknown-linux-musl
-            cpu_family: ppc64
-            cpu: powerpc64le
-          - name: powerpc64
-            tool: powerpc64-unknown-linux-musl
-            cpu_family: ppc64
-            cpu: ppc64
-          - name: powerpcle
-            tool: powerpcle-unknown-linux-musl
-            cpu_family: ppc
-            cpu: powerpcle
-          - name: powerpc
-            tool: powerpc-unknown-linux-musl
-            cpu_family: ppc
-            cpu: ppc
-          - name: riscv32
-            tool: riscv32-unknown-linux-musl
-            cpu_family: riscv32
-            cpu: riscv32
-          - name: riscv64
-            tool: riscv64-unknown-linux-musl
-            cpu_family: riscv64
-            cpu: riscv64
-          - name: s390x
-            tool: s390x-ibm-linux-musl
-            cpu_family: s390x
-            cpu: s390x
-          - name: sh4
-            tool: sh4-multilib-linux-musl
-            cpu_family: sh4
-            cpu: sh4
+          # - name: i586
+          #   tool: i586-unknown-linux-musl
+          #   cpu_family: x86_64
+          #   cpu: i586
+          # - name: i686
+          #   tool: i686-unknown-linux-musl
+          #   cpu_family: x86_64
+          #   cpu: i686
+          # - name: loong64
+          #   tool: loongarch64-unknown-linux-musl
+          #   cpu_family: loongarch64
+          #   cpu: loongarch64
+          # - name: m68k
+          #   tool: m68k-unknown-linux-musl
+          #   cpu_family: m68k
+          #   cpu: m68k
+          # - name: microblazeel
+          #   tool: microblazeel-xilinx-linux-musl
+          #   cpu_family: microblazeel
+          #   cpu: microblazeel
+          # - name: microblaze
+          #   tool: microblaze-xilinx-linux-musl
+          #   cpu_family: microblaze
+          #   cpu: microblaze
+          # - name: mips64el
+          #   tool: mips64el-unknown-linux-musl
+          #   cpu_family: mips64
+          #   cpu: mips64el
+          # - name: mips64
+          #   tool: mips64-unknown-linux-musl
+          #   cpu_family: mips64
+          #   cpu: mips64
+          # - name: mips32el
+          #   tool: mipsel-unknown-linux-musl
+          #   cpu_family: mips64
+          #   cpu: mips32el
+          # - name: mips32elsf
+          #   tool: mipsel-unknown-linux-muslsf
+          #   cpu_family: mips64
+          #   cpu: mips32elsf
+          # - name: mips32
+          #   tool: mips-unknown-linux-musl
+          #   cpu_family: mips
+          #   cpu: mips
+          # - name: mips32sf
+          #   tool: mips-unknown-linux-muslsf
+          #   cpu_family: mips
+          #   cpu: mips32sf
+          # - name: or1k
+          #   tool: or1k-unknown-linux-musl
+          #   cpu_family: or1k
+          #   cpu: or1k
+          # - name: powerpc64le
+          #   tool: powerpc64le-unknown-linux-musl
+          #   cpu_family: ppc64
+          #   cpu: powerpc64le
+          # - name: powerpc64
+          #   tool: powerpc64-unknown-linux-musl
+          #   cpu_family: ppc64
+          #   cpu: ppc64
+          # - name: powerpcle
+          #   tool: powerpcle-unknown-linux-musl
+          #   cpu_family: ppc
+          #   cpu: powerpcle
+          # - name: powerpc
+          #   tool: powerpc-unknown-linux-musl
+          #   cpu_family: ppc
+          #   cpu: ppc
+          # - name: riscv32
+          #   tool: riscv32-unknown-linux-musl
+          #   cpu_family: riscv32
+          #   cpu: riscv32
+          # - name: riscv64
+          #   tool: riscv64-unknown-linux-musl
+          #   cpu_family: riscv64
+          #   cpu: riscv64
+          # - name: s390x
+          #   tool: s390x-ibm-linux-musl
+          #   cpu_family: s390x
+          #   cpu: s390x
+          # - name: sh4
+          #   tool: sh4-multilib-linux-musl
+          #   cpu_family: sh4
+          #   cpu: sh4
           - name: x86_64
             cpu_family: x86_64
             cpu: x86_64
