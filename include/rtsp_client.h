@@ -67,6 +67,7 @@ private:
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
     uint16_t get_random_rtp_port();
+    bool bind_udp_socket(int &fd, uint16_t &port);
 
     void handle_rtsp(uint32_t event);
     void handle_rtp(uint32_t event);

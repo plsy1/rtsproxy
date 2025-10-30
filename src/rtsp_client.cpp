@@ -38,8 +38,6 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
     loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
 
     send_http_response();
-
-    rtp_port_ = get_random_rtp_port();
     init_rtp_rtcp_sockets();
     if (ServerConfig::isNatEnabled() == true)
     {
@@ -444,22 +442,54 @@ void RTSPClient::build_and_send_request()
     }
 }
 
+bool RTSPClient::bind_udp_socket(int &fd, uint16_t &port)
+{
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    const int max_attempts = 10;
+    for (int i = 0; i < max_attempts; ++i)
+    {
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd < 0)
+            return false;
+
+        port = get_random_rtp_port();
+        addr.sin_port = htons(port);
+
+        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+        {
+            fcntl(fd, F_SETFL, O_NONBLOCK);
+            return true;
+        }
+
+        close(fd);
+    }
+
+    return false;
+}
+
 void RTSPClient::init_rtp_rtcp_sockets()
 {
-    rtp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    sockaddr_in rtp_addr{};
-    rtp_addr.sin_family = AF_INET;
-    rtp_addr.sin_port = htons(rtp_port_);
-    rtp_addr.sin_addr.s_addr = INADDR_ANY;
-    bind(rtp_fd_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr));
-    fcntl(rtp_fd_, F_SETFL, O_NONBLOCK);
+    if (!bind_udp_socket(rtp_fd_, rtp_port_))
+    {
+        Logger::error("[RTP] Failed to bind RTP socket after multiple attempts");
+        return;
+    }
 
-    rtcp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    uint16_t rtcp_port = rtp_port_ + 1;
     sockaddr_in rtcp_addr{};
     rtcp_addr.sin_family = AF_INET;
-    rtcp_addr.sin_port = htons(rtp_port_ + 1);
+    rtcp_addr.sin_port = htons(rtcp_port);
     rtcp_addr.sin_addr.s_addr = INADDR_ANY;
-    bind(rtcp_fd_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr));
+
+    rtcp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (bind(rtcp_fd_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr)) < 0)
+    {
+        Logger::error("[RTP] Failed to bind RTCP socket");
+        on_closed_callback_();
+    }
     fcntl(rtcp_fd_, F_SETFL, O_NONBLOCK);
 
     rtp_ctx_ = new SocketCtx{rtp_fd_, std::bind(&RTSPClient::handle_rtp, this, std::placeholders::_1)};
