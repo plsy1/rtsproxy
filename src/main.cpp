@@ -1,10 +1,10 @@
 #include "../include/epoll_loop.h"
 #include "../include/logger.h"
 #include "../include/server_config.h"
-#include "../include/handle.h"
+#include "../include/http_handle.h"
 #include "../include/buffer_pool.h"
 #include "../include/common/socket_ctx.h"
-#include "../include/parse_url.h"
+#include "../include/http_parser.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    ParseURL::load_json(ServerConfig::getJsonPath());
+    httpParser::load_json(ServerConfig::getJsonPath());
 
     EpollLoop loop;
     BufferPool pool(ServerConfig::getUdpPacketSize(), ServerConfig::getRtpBufferSize());

@@ -1,8 +1,11 @@
 #pragma once
 
+#include "../include/common/rtsp_ctx.h"
+
 #include <string>
 #include <queue>
 #include <vector>
+#include <map>
 #include <netinet/in.h>
 #include <functional>
 
@@ -21,12 +24,7 @@ public:
 
     void set_on_closed_callback(ClosedCallback cb);
 
-    void handle_tcp_control(uint32_t event);
-    void handle_rtp_control(uint32_t event);
-    void handle_rtcp_control(uint32_t event);
-    void handle_client_control(uint32_t event);
-
-public:
+private:
     enum class RtspState
     {
         DISCONNECTED,
@@ -37,9 +35,21 @@ public:
         STREAMING
     };
 
+    enum class RtspMethod
+    {
+        OPTIONS,
+        DESCRIBE,
+        SETUP,
+        PLAY,
+        PAUSE,
+        TEARDOWN,
+        GET_PARAMETER,
+        SET_PARAMETER
+    };
+
     struct RtspRequest
     {
-        std::string method;
+        RtspMethod method;
         std::string uri;
         std::string headers;
         std::string body;
@@ -47,49 +57,47 @@ public:
     };
 
 private:
-    void init_client_fd();
-    bool connect_server();
-    void push_request_into_queue(const std::string &method,
-                                 const std::string &extra_headers = "",
-                                 const std::string &body = "");
-    void parse_url(const std::string &url);
-    void build_and_send_request();
-    std::string build_uri_for_method(const std::string &method) const;
-
-    int parse_status_code(const std::string &resp);
-    void process_response(const std::string &resp);
-    void parse_session(const std::string &resp);
-    void parse_server_ports(const std::string &resp);
-
-    std::vector<std::string> parse_sdp_tracks(const std::string &sdp);
-
-    bool init_rtp_rtcp_sockets();
+    void init_rtp_rtcp_sockets();
     void init_rtp_rtcp_server_addr();
-    void register_sockets_to_epoll(SocketCtx *ctx, uint32_t events);
+    void init_timer_fd();
+    void connect_server();
+    void push_request_into_queue(RtspMethod method, const std::string &uri, const std::string &extra_headers = "", const std::string &body = "");
+    void build_and_send_request();
     void send_rtp_trigger();
-    bool start_getparameter_timer();
-    void on_timer_fd(uint32_t event);
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
     uint16_t get_random_rtp_port();
 
-    void on_tcp_control_writable();
-    void on_tcp_control_readable();
-    void on_rtp_control_writable();
-    void on_rtp_control_readable();
-    void on_rtcp_control_writable();
-    void on_rtcp_control_readable();
-    void on_client_control_writable();
-    void on_client_control_readable();
-    void on_client_control_closed();
+    void handle_rtsp(uint32_t event);
+    void handle_rtp(uint32_t event);
+    void handle_rtcp(uint32_t event);
+    void handle_client(uint32_t event);
+    void handle_timer(uint32_t event);
+
+    void on_rtsp_writable();
+    void on_rtsp_readable();
+    void on_rtp_writable();
+    void on_rtp_readable();
+    void on_rtcp_writable();
+    void on_rtcp_readable();
+    void on_client_writable();
+    void on_client_readable();
+    void on_client_closed();
+
+    void send_rtsp_option();
+    void send_rtsp_describe();
+    void send_rtsp_setup();
+    void send_rtsp_play();
+    
+    std::string RtspMethodToString(RtspMethod method);
 
 private:
     EpollLoop *loop;
     BufferPool &buffer_pool_;
-    SocketCtx *sock_ctx_ = nullptr;
+    SocketCtx *rtsp_ctx_ = nullptr;
     SocketCtx *rtp_ctx_ = nullptr;
     SocketCtx *rtcp_ctx_ = nullptr;
-    SocketCtx *common_ = nullptr;
+    SocketCtx *client_ctx_ = nullptr;
     SocketCtx *timer_ctx = nullptr;
     ClosedCallback on_closed_callback_;
 
@@ -97,18 +105,15 @@ private:
     sockaddr_in server_rtp_addr_;
     sockaddr_in server_rtcp_addr_;
 
-    uint8_t seq_ = 1;
-    uint16_t server_rtsp_port_;
-    uint16_t server_rtp_port_ = 0;
-    uint16_t server_rtcp_port_ = 0;
-    uint16_t client_rtp_port_;
+    uint8_t cseq_ = 1;
+    uint16_t rtp_port_;
     uint16_t nat_wan_port = 0;
     bool is_init_ok = false;
 
     size_t tcp_send_offset_ = 0;
     size_t payload_offset = 0;
 
-    int client_fd_;
+    int client_fd_ = -1;
     int rtsp_fd_ = -1;
     int rtp_fd_ = -1;
     int rtcp_fd_ = -1;
@@ -116,15 +121,12 @@ private:
 
     RtspState state_ = RtspState::DISCONNECTED;
 
-    std::string server_ip_;
-    std::string path_;
-    std::string track_;
-    std::string session_id_;
-    std::string transport_;
     std::string nat_wan_ip;
     std::string req_buf_;
     std::string resp_buf_;
-    std::string rtsp_url_;
+    char rtsp_buf[2048];
+
+    rtspCtx ctx;
 
     RtspRequest current_request_;
     std::queue<RtspRequest> request_queue_;

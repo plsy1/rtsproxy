@@ -4,14 +4,16 @@
 #include "../include/server_config.h"
 #include "../include/buffer_pool.h"
 #include "../include/common/socket_ctx.h"
+#include "../include/common/rtsp_ctx.h"
 #include "../include/stun_client.h"
 #include "../include/utils.h"
+#include "../include/rtsp_parser.h"
+
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <cerrno>
-#include <sstream>
+#include <algorithm>
 #include <cstring>
 #include <sys/timerfd.h>
 #include <unistd.h>
@@ -20,13 +22,24 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
     : loop(loop),
       buffer_pool_(pool),
       client_addr_(client_addr),
-      client_fd_(client_fd),
-      rtsp_url_(rtsp_url)
-
+      client_fd_(client_fd)
 {
-    parse_url(rtsp_url_);
-    init_client_fd();
-    client_rtp_port_ = get_random_rtp_port();
+
+    ctx.rtsp_url = rtsp_url;
+
+    if (rtspParser::parse_url(rtsp_url, ctx) != 0)
+    {
+        on_closed_callback_();
+    }
+
+    client_ctx_ = new SocketCtx{
+        client_fd_,
+        std::bind(&RTSPClient::handle_client, this, std::placeholders::_1)};
+    loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
+
+    send_http_response();
+
+    rtp_port_ = get_random_rtp_port();
     init_rtp_rtcp_sockets();
     if (ServerConfig::isNatEnabled() == true)
     {
@@ -35,8 +48,7 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
     else
     {
         is_init_ok = true;
-        connect_server();
-        push_request_into_queue("OPTIONS", "", "");
+        send_rtsp_option();
     }
 }
 
@@ -48,10 +60,10 @@ void RTSPClient::set_on_closed_callback(ClosedCallback cb)
 RTSPClient::~RTSPClient()
 {
 
-    if (sock_ctx_)
+    if (rtsp_ctx_)
     {
-        delete sock_ctx_;
-        sock_ctx_ = nullptr;
+        delete rtsp_ctx_;
+        rtsp_ctx_ = nullptr;
     }
 
     if (rtp_ctx_)
@@ -66,10 +78,10 @@ RTSPClient::~RTSPClient()
         rtcp_ctx_ = nullptr;
     }
 
-    if (common_)
+    if (client_ctx_)
     {
-        delete common_;
-        common_ = nullptr;
+        delete client_ctx_;
+        client_ctx_ = nullptr;
     }
 
     if (timer_ctx)
@@ -111,43 +123,17 @@ RTSPClient::~RTSPClient()
     send_queue_.clear();
 }
 
-void RTSPClient::parse_url(const std::string &url)
-{
-    if (!url.rfind("rtsp://", 0) == 0)
-        return;
-
-    size_t slash = url.find('/', 7);
-    std::string hostport = url.substr(7, slash - 7);
-    size_t colon = hostport.find(':');
-
-    if (colon != std::string::npos)
-    {
-        server_ip_ = hostport.substr(0, colon);
-        server_rtsp_port_ = std::stoi(hostport.substr(colon + 1));
-    }
-    else
-    {
-        server_ip_ = hostport;
-        server_rtsp_port_ = 554;
-    }
-
-    path_ = (slash != std::string::npos) ? url.substr(slash) : "/";
-}
-
-bool RTSPClient::connect_server()
+void RTSPClient::connect_server()
 {
     rtsp_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (rtsp_fd_ < 0)
-        return false;
-
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(server_rtsp_port_);
-    inet_pton(AF_INET, server_ip_.c_str(), &addr.sin_addr);
+    addr.sin_port = htons(ctx.server_rtsp_port);
+    inet_pton(AF_INET, ctx.server_ip.c_str(), &addr.sin_addr);
 
     fcntl(rtsp_fd_, F_SETFL, O_NONBLOCK);
 
-    sock_ctx_ = new SocketCtx{rtsp_fd_, std::bind(&RTSPClient::handle_tcp_control, this, std::placeholders::_1)};
+    rtsp_ctx_ = new SocketCtx{rtsp_fd_, std::bind(&RTSPClient::handle_rtsp, this, std::placeholders::_1)};
 
     int res = connect(rtsp_fd_, (struct sockaddr *)&addr, sizeof(addr));
     if (res < 0 && errno != EINPROGRESS)
@@ -155,70 +141,80 @@ bool RTSPClient::connect_server()
         Logger::error("[RTSP] Connect to upstream failed.");
         close(rtsp_fd_);
         rtsp_fd_ = -1;
-        return false;
+        return;
     }
-    register_sockets_to_epoll(sock_ctx_, EPOLLOUT);
+
+    loop->set(rtsp_ctx_, rtsp_fd_, EPOLLOUT);
 
     state_ = RtspState::CONNECTING;
-    return true;
 }
 
-void RTSPClient::handle_tcp_control(uint32_t event)
+void RTSPClient::handle_rtsp(uint32_t event)
 {
     if (event & EPOLLIN)
     {
-        on_tcp_control_readable();
+        on_rtsp_readable();
     }
     if (event & EPOLLOUT)
     {
-        on_tcp_control_writable();
+        on_rtsp_writable();
     }
 }
 
-void RTSPClient::handle_rtp_control(uint32_t event)
+void RTSPClient::handle_rtp(uint32_t event)
 {
     if (event & EPOLLIN)
     {
-        on_rtp_control_readable();
+        on_rtp_readable();
     }
     if (event & EPOLLOUT)
     {
-        on_rtp_control_writable();
+        on_rtp_writable();
     }
 }
 
-void RTSPClient::handle_rtcp_control(uint32_t event)
+void RTSPClient::handle_rtcp(uint32_t event)
 {
     if (event & EPOLLIN)
     {
-        on_rtcp_control_readable();
+        on_rtcp_readable();
     }
     if (event & EPOLLOUT)
     {
-        on_rtcp_control_writable();
+        on_rtcp_writable();
     }
 }
 
-void RTSPClient::handle_client_control(uint32_t event)
+void RTSPClient::handle_client(uint32_t event)
 {
     if (event & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
     {
-        on_client_control_closed();
+        on_client_closed();
         return;
     }
     if (event & EPOLLIN)
     {
-        on_client_control_readable();
+        on_client_readable();
     }
     if (event & EPOLLOUT)
     {
-        on_client_control_writable();
+        on_client_writable();
     }
 }
 
-void RTSPClient::on_tcp_control_writable()
+void RTSPClient::handle_timer(uint32_t event)
 {
-    // check if coonnect success
+    if (event & EPOLLIN)
+    {
+        uint64_t expirations;
+        read(timer_fd, &expirations, sizeof(expirations));
+        push_request_into_queue(RtspMethod::GET_PARAMETER, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path);
+        build_and_send_request();
+    }
+}
+
+void RTSPClient::on_rtsp_writable()
+{
     if (state_ == RtspState::CONNECTING)
     {
         int err = 0;
@@ -226,12 +222,11 @@ void RTSPClient::on_tcp_control_writable()
         if (getsockopt(rtsp_fd_, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0)
         {
             Logger::error("[RTSP] Connect to upstream failed.");
-            if (on_closed_callback_)
-                on_closed_callback_();
+            on_closed_callback_();
             return;
         }
         Logger::info("[RTSP] Connection to upstream established.");
-        state_ = RtspState::IDLE;
+        state_ = RtspState::CONNECTED;
         return;
     }
 
@@ -242,41 +237,76 @@ void RTSPClient::on_tcp_control_writable()
         tcp_send_offset_ += n;
         if (tcp_send_offset_ == req_buf_.size())
         {
-            loop->set(sock_ctx_, rtsp_fd_, EPOLLIN);
+            loop->set(rtsp_ctx_, rtsp_fd_, EPOLLIN);
             tcp_send_offset_ = 0;
         }
     }
     else
     {
         Logger::error("[RTSP] RTSP control message send failed.");
-        if (on_closed_callback_)
-            on_closed_callback_();
+
+        on_closed_callback_();
         return;
     }
 }
 
-void RTSPClient::on_tcp_control_readable()
+void RTSPClient::on_rtsp_readable()
 {
-    char buf[2048];
     while (true)
     {
-        ssize_t n = recv(rtsp_fd_, buf, sizeof(buf), 0);
+        ssize_t n = recv(rtsp_fd_, rtsp_buf, sizeof(rtsp_buf), 0);
         if (n > 0)
         {
-            resp_buf_.append(buf, n);
+            resp_buf_.append(rtsp_buf, n);
             if (resp_buf_.find("\r\n\r\n") != std::string::npos)
             {
-                process_response(resp_buf_);
+                rtspParser::parse_session_id(resp_buf_, ctx);
+
+                if (rtspParser::parse_status_code(resp_buf_) != 200)
+                {
+                    Logger::error("[RTSP] Connection to upstream refused. Please verify if the URL is correct.");
+                    on_closed_callback_();
+                }
+
+                if (current_request_.method == RtspMethod::OPTIONS)
+                {
+                    send_rtsp_describe();
+                }
+
+                else if (current_request_.method == RtspMethod::DESCRIBE)
+                {
+
+                    send_rtsp_setup();
+                }
+
+                else if (current_request_.method == RtspMethod::SETUP)
+                {
+                    if (rtspParser::parse_server_ports(resp_buf_, ctx) != 0)
+                    {
+                        Logger::error("Can't parser server port");
+                        on_closed_callback_();
+                    }
+
+                    Logger::info(std::string("[RTSP] SETUP done, ready to PLAY, server port: " + std::to_string(ctx.server_rtp_port) + "-" + std::to_string(ctx.server_rtcp_port)));
+
+                    init_rtp_rtcp_server_addr();
+                    send_rtp_trigger();
+                    send_rtsp_play();
+                }
+                else if (current_request_.method == RtspMethod::PLAY)
+                {
+                    Logger::info(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" + std::to_string(ntohs(client_addr_.sin_port))));
+                    init_timer_fd();
+                    state_ = RtspState::STREAMING;
+                }
+
                 resp_buf_.clear();
             }
         }
         else if (n == 0)
         {
             Logger::info("[RTSP] Server closed connection");
-            close(rtsp_fd_);
-            rtsp_fd_ = -1;
-            state_ = RtspState::DISCONNECTED;
-            break;
+            on_closed_callback_();
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
@@ -285,247 +315,16 @@ void RTSPClient::on_tcp_control_readable()
         else
         {
             Logger::warn("[RTSP] Receive failed");
-            break;
+            on_closed_callback_();
         }
     }
 }
 
-void RTSPClient::push_request_into_queue(const std::string &method,
-                                         const std::string &extra_headers,
-                                         const std::string &body)
-{
-    std::string uri = build_uri_for_method(method);
-    RtspRequest req{method, uri, extra_headers, body, seq_++};
-    request_queue_.push(req);
-    build_and_send_request();
-}
-
-void RTSPClient::build_and_send_request()
-{
-    if (!request_queue_.empty())
-    {
-        current_request_ = request_queue_.front();
-        request_queue_.pop();
-
-        req_buf_.clear();
-        req_buf_ += current_request_.method + " " + current_request_.uri + " RTSP/1.0\r\n";
-        req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
-        if (!session_id_.empty())
-            req_buf_ += "Session: " + session_id_ + "\r\n";
-        req_buf_ += current_request_.headers;
-        if (!current_request_.body.empty())
-            req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;
-        else
-            req_buf_ += "\r\n";
-
-        tcp_send_offset_ = 0;
-        loop->set(sock_ctx_, rtsp_fd_, EPOLLOUT);
-    }
-}
-
-int RTSPClient::parse_status_code(const std::string &resp)
-{
-    int code = -1;
-    sscanf(resp.c_str(), "RTSP/%*s %d", &code);
-    return code;
-}
-
-void RTSPClient::parse_session(const std::string &resp)
-{
-    size_t pos = resp.find("Session:");
-    if (pos == std::string::npos)
-        return;
-    pos += 8;
-    while (pos < resp.size() && (resp[pos] == ' ' || resp[pos] == '\t'))
-        ++pos;
-    size_t end = resp.find_first_of(";\r\n", pos);
-    session_id_ = resp.substr(pos, end - pos);
-}
-
-void RTSPClient::process_response(const std::string &resp)
-{
-    int code = parse_status_code(resp);
-    parse_session(resp);
-
-    if (code == 200)
-    {
-        if (current_request_.method == "OPTIONS")
-        {
-            push_request_into_queue("DESCRIBE",
-                                    "Accept: application/sdp\r\n", "");
-        }
-        else if (current_request_.method == "DESCRIBE")
-        {
-            auto tracks = parse_sdp_tracks(resp);
-            for (const auto &t : tracks)
-            {
-                if (t.rfind("rtsp://", 0) == 0)
-                    track_ = t;
-                else
-                    track_ = "rtsp://" + server_ip_ + ":" +
-                             std::to_string(server_rtsp_port_) + path_ + "/" + t;
-            }
-
-            std::ostringstream oss;
-            oss << "Transport: RTP/AVP;unicast;client_port="
-                << (nat_wan_port ? nat_wan_port : client_rtp_port_)
-                << "-"
-                << (nat_wan_port ? (nat_wan_port + 1) : (client_rtp_port_ + 1))
-                << "\r\n";
-            std::string header = oss.str();
-            Logger::info(
-                std::string("[RTSP] SETUP with client port: " +
-                            std::to_string((nat_wan_port ? nat_wan_port : client_rtp_port_)) +
-                            "-" +
-                            std::to_string((nat_wan_port ? (nat_wan_port + 1) : (client_rtp_port_ + 1)))));
-            push_request_into_queue("SETUP", header, "");
-        }
-        else if (current_request_.method == "SETUP")
-        {
-
-            parse_server_ports(resp);
-            init_rtp_rtcp_server_addr();
-            send_rtp_trigger();
-            
-            Logger::info(
-                std::string("[RTSP] SETUP done, ready to PLAY, server port: " +
-                            std::to_string(server_rtp_port_) + "-" +
-                            std::to_string(server_rtcp_port_)));
-
-            std::ostringstream play_header;
-
-            play_header << "Range: npt=0.000-" << "\r\n";
-            std::string header = play_header.str();
-            push_request_into_queue("PLAY", header);
-        }
-        else if (current_request_.method == "PLAY")
-        {
-            Logger::info(std::string("[RTSP] Streaming Start: " + rtsp_url_ + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" +
-                                     std::to_string(ntohs(client_addr_.sin_port))
-
-                                         ));
-            start_getparameter_timer();
-        }
-
-        else if (current_request_.method == "STREAMING")
-        {
-        }
-    }
-    else
-    {
-        Logger::error("[RTSP] Connection to upstream refused. Please verify if the URL is correct.");
-        state_ = RtspState::IDLE;
-    }
-}
-
-std::string RTSPClient::build_uri_for_method(const std::string &method) const
-{
-    if (method == "SETUP")
-        return "rtsp://" + server_ip_ + ":" + std::to_string(server_rtsp_port_) + path_ + track_;
-    return "rtsp://" + server_ip_ + ":" + std::to_string(server_rtsp_port_) + path_;
-}
-
-std::vector<std::string> RTSPClient::parse_sdp_tracks(const std::string &sdp)
-{
-    std::vector<std::string> tracks;
-    std::istringstream ss(sdp);
-    std::string line;
-    while (std::getline(ss, line))
-    {
-        if (line.rfind("a=control:trackID", 0) == 0)
-            tracks.push_back(line.substr(strlen("a=control:")));
-    }
-    return tracks;
-}
-
-void RTSPClient::parse_server_ports(const std::string &resp)
-{
-    size_t pos = resp.find("Transport:");
-    if (pos == std::string::npos)
-        return;
-
-    size_t end = resp.find("\r\n", pos);
-    transport_ = resp.substr(pos, end - pos);
-
-    size_t sp_pos = transport_.find("server_port=");
-    if (sp_pos != std::string::npos)
-    {
-        sp_pos += strlen("server_port=");
-        size_t dash = transport_.find('-', sp_pos);
-        if (dash != std::string::npos)
-        {
-            try
-            {
-                server_rtp_port_ = std::stoi(transport_.substr(sp_pos, dash - sp_pos));
-                server_rtcp_port_ = std::stoi(transport_.substr(dash + 1));
-            }
-            catch (...)
-            {
-                server_rtp_port_ = server_rtcp_port_ = 0;
-            }
-        }
-    }
-}
-
-bool RTSPClient::init_rtp_rtcp_sockets()
-{
-    rtp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (rtp_fd_ < 0)
-        return false;
-
-    sockaddr_in rtp_addr{};
-    rtp_addr.sin_family = AF_INET;
-    rtp_addr.sin_port = htons(client_rtp_port_);
-    rtp_addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(rtp_fd_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) < 0)
-        return false;
-
-    fcntl(rtp_fd_, F_SETFL, O_NONBLOCK);
-
-    rtcp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (rtcp_fd_ < 0)
-        return false;
-
-    sockaddr_in rtcp_addr{};
-    rtcp_addr.sin_family = AF_INET;
-    rtcp_addr.sin_port = htons(client_rtp_port_ + 1);
-    rtcp_addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(rtcp_fd_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr)) < 0)
-        return false;
-
-    fcntl(rtcp_fd_, F_SETFL, O_NONBLOCK);
-
-    rtp_ctx_ = new SocketCtx{rtp_fd_, std::bind(&RTSPClient::handle_rtp_control, this, std::placeholders::_1)};
-    rtcp_ctx_ = new SocketCtx{rtcp_fd_, std::bind(&RTSPClient::handle_rtcp_control, this, std::placeholders::_1)};
-
-    register_sockets_to_epoll(rtp_ctx_, EPOLLIN);
-    register_sockets_to_epoll(rtcp_ctx_, EPOLLIN);
-
-    return true;
-}
-
-void RTSPClient::init_rtp_rtcp_server_addr()
-{
-    server_rtp_addr_.sin_family = AF_INET;
-    server_rtp_addr_.sin_port = htons(server_rtp_port_);
-    inet_pton(AF_INET, server_ip_.c_str(), &server_rtp_addr_.sin_addr);
-
-    server_rtcp_addr_.sin_family = AF_INET;
-    server_rtcp_addr_.sin_port = htons(server_rtcp_port_);
-    inet_pton(AF_INET, server_ip_.c_str(), &server_rtcp_addr_.sin_addr);
-}
-
-void RTSPClient::register_sockets_to_epoll(SocketCtx *ctx, uint32_t events)
-{
-
-    loop->set(ctx, ctx->fd, events);
-}
-
-void RTSPClient::on_rtp_control_writable()
+void RTSPClient::on_rtp_writable()
 {
 }
 
-void RTSPClient::on_rtp_control_readable()
+void RTSPClient::on_rtp_readable()
 {
     auto buf = buffer_pool_.acquire();
     ssize_t n = recvfrom(rtp_fd_, buf.get(), 1500, 0, nullptr, nullptr);
@@ -554,8 +353,7 @@ void RTSPClient::on_rtp_control_readable()
         }
         buffer_pool_.release(std::move(buf));
         is_init_ok = true;
-        connect_server();
-        push_request_into_queue("OPTIONS", "", "");
+        send_rtsp_option();
     }
     else
     {
@@ -563,18 +361,19 @@ void RTSPClient::on_rtp_control_readable()
         buffer_pool_.release(std::move(buf));
     }
 
-    if (loop && client_fd_ >= 0 && common_)
-        loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
+    if (loop && client_fd_ >= 0 && client_ctx_)
+        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
 }
 
-void RTSPClient::on_rtcp_control_writable()
-{
-}
-void RTSPClient::on_rtcp_control_readable()
+void RTSPClient::on_rtcp_writable()
 {
 }
 
-void RTSPClient::on_client_control_writable()
+void RTSPClient::on_rtcp_readable()
+{
+}
+
+void RTSPClient::on_client_writable()
 {
     while (!send_queue_.empty())
     {
@@ -586,7 +385,7 @@ void RTSPClient::on_client_control_writable()
                 break;
             else
             {
-                on_client_control_closed();
+                on_client_closed();
                 return;
             }
         }
@@ -605,23 +404,84 @@ void RTSPClient::on_client_control_writable()
     }
 
     if (send_queue_.empty())
-        loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
+        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
 }
 
-void RTSPClient::on_client_control_readable()
+void RTSPClient::on_client_readable()
 {
 }
-void RTSPClient::on_client_control_closed()
+
+void RTSPClient::on_client_closed()
 {
-    if (on_closed_callback_)
-        on_closed_callback_();
+    on_closed_callback_();
+}
+
+void RTSPClient::push_request_into_queue(RtspMethod method, const std::string &uri, const std::string &extra_headers, const std::string &body)
+{
+    RtspRequest req{method, uri, extra_headers, body, cseq_++};
+    request_queue_.push(req);
+}
+
+void RTSPClient::build_and_send_request()
+{
+    if (!request_queue_.empty())
+    {
+        current_request_ = request_queue_.front();
+        request_queue_.pop();
+
+        req_buf_.clear();
+        req_buf_ += RtspMethodToString(current_request_.method) + " " + current_request_.uri + " RTSP/1.0\r\n";
+        req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
+        req_buf_ += "Session: " + ctx.session_id + "\r\n";
+        req_buf_ += current_request_.headers;
+        if (!current_request_.body.empty())
+            req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;
+        else
+            req_buf_ += "\r\n";
+
+        tcp_send_offset_ = 0;
+        loop->set(rtsp_ctx_, rtsp_fd_, EPOLLOUT);
+    }
+}
+
+void RTSPClient::init_rtp_rtcp_sockets()
+{
+    rtp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in rtp_addr{};
+    rtp_addr.sin_family = AF_INET;
+    rtp_addr.sin_port = htons(rtp_port_);
+    rtp_addr.sin_addr.s_addr = INADDR_ANY;
+    bind(rtp_fd_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr));
+    fcntl(rtp_fd_, F_SETFL, O_NONBLOCK);
+
+    rtcp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in rtcp_addr{};
+    rtcp_addr.sin_family = AF_INET;
+    rtcp_addr.sin_port = htons(rtp_port_ + 1);
+    rtcp_addr.sin_addr.s_addr = INADDR_ANY;
+    bind(rtcp_fd_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr));
+    fcntl(rtcp_fd_, F_SETFL, O_NONBLOCK);
+
+    rtp_ctx_ = new SocketCtx{rtp_fd_, std::bind(&RTSPClient::handle_rtp, this, std::placeholders::_1)};
+    rtcp_ctx_ = new SocketCtx{rtcp_fd_, std::bind(&RTSPClient::handle_rtcp, this, std::placeholders::_1)};
+
+    loop->set(rtp_ctx_, rtp_fd_, EPOLLIN);
+    loop->set(rtcp_ctx_, rtcp_fd_, EPOLLIN);
+}
+
+void RTSPClient::init_rtp_rtcp_server_addr()
+{
+    server_rtp_addr_.sin_family = AF_INET;
+    server_rtp_addr_.sin_port = htons(ctx.server_rtp_port);
+    inet_pton(AF_INET, ctx.server_ip.c_str(), &server_rtp_addr_.sin_addr);
+
+    server_rtcp_addr_.sin_family = AF_INET;
+    server_rtcp_addr_.sin_port = htons(ctx.server_rtcp_port);
+    inet_pton(AF_INET, ctx.server_ip.c_str(), &server_rtcp_addr_.sin_addr);
 }
 
 void RTSPClient::send_rtp_trigger()
 {
-    if (rtp_fd_ < 0)
-        return;
-
     char dummy = 0;
     ssize_t n = sendto(rtp_fd_, &dummy, 1, 0,
                        (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
@@ -629,61 +489,23 @@ void RTSPClient::send_rtp_trigger()
     {
         Logger::error("[RTP] Trigger send failed");
     }
-    else
-    {
-        Logger::debug("[RTP] Trigger sent");
-    }
 }
 
-void RTSPClient::on_timer_fd(uint32_t event)
-{
-    if (event & EPOLLIN)
-    {
-        uint64_t expirations;
-        read(timer_fd, &expirations, sizeof(expirations));
-        push_request_into_queue("GET_PARAMETER");
-    }
-}
-
-bool RTSPClient::start_getparameter_timer()
+void RTSPClient::init_timer_fd()
 {
     timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    if (timer_fd < 0)
-    {
-        Logger::error("[RTP] Keepalive timer create failed");
-        return false;
-    }
-
     struct itimerspec its{};
     its.it_value.tv_sec = 20;
     its.it_value.tv_nsec = 0;
     its.it_interval.tv_sec = 20;
     its.it_interval.tv_nsec = 0;
 
-    if (timerfd_settime(timer_fd, 0, &its, nullptr) < 0)
-    {
-        Logger::error("[RTP] Keepalive timer  settime failed");
-        close(timer_fd);
-        timer_fd = -1;
-        return false;
-    }
+    timerfd_settime(timer_fd, 0, &its, nullptr);
 
     timer_ctx = new SocketCtx{
         timer_fd,
-        std::bind(&RTSPClient::on_timer_fd, this, std::placeholders::_1)};
+        std::bind(&RTSPClient::handle_timer, this, std::placeholders::_1)};
     loop->set(timer_ctx, timer_fd, EPOLLIN);
-
-    return true;
-}
-
-void RTSPClient::init_client_fd()
-{
-    common_ = new SocketCtx{
-        client_fd_,
-        std::bind(&RTSPClient::handle_client_control, this, std::placeholders::_1)};
-    loop->set(common_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
-
-    send_http_response();
 }
 
 void RTSPClient::send_http_response()
@@ -756,4 +578,86 @@ uint16_t RTSPClient::get_random_rtp_port()
 
     int port = 10000 + (rand() % 25000) * 2;
     return port;
+}
+
+std::string RTSPClient::RtspMethodToString(RtspMethod method)
+{
+    switch (method)
+    {
+    case RtspMethod::OPTIONS:
+        return "OPTIONS";
+    case RtspMethod::DESCRIBE:
+        return "DESCRIBE";
+    case RtspMethod::SETUP:
+        return "SETUP";
+    case RtspMethod::PLAY:
+        return "PLAY";
+    case RtspMethod::PAUSE:
+        return "PAUSE";
+    case RtspMethod::TEARDOWN:
+        return "TEARDOWN";
+    case RtspMethod::GET_PARAMETER:
+        return "GET_PARAMETER";
+    case RtspMethod::SET_PARAMETER:
+        return "SET_PARAMETER";
+    default:
+        return "";
+    }
+}
+
+void RTSPClient::send_rtsp_option()
+{
+    connect_server();
+    push_request_into_queue(RtspMethod::OPTIONS, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path, "", "");
+    build_and_send_request();
+}
+
+void RTSPClient::send_rtsp_describe()
+{
+    push_request_into_queue(RtspMethod::DESCRIBE, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path, "Accept: application/sdp\r\n", "");
+    build_and_send_request();
+}
+
+void RTSPClient::send_rtsp_setup()
+{
+    rtspParser::SDP::parseSDP(resp_buf_, ctx);
+
+    std::string track;
+
+    for (const auto &media : ctx.sdp.media_streams)
+    {
+
+        if (std::find(media.formats.begin(), media.formats.end(), "33") != media.formats.end())
+        {
+            track = media.trackID;
+            break;
+        }
+    }
+
+    if (track.empty())
+    {
+        Logger::error("[RTSP] Unsupported video format, no track with format 33 found!");
+        on_closed_callback_();
+    }
+
+    int port1 = nat_wan_port ? nat_wan_port : rtp_port_;
+    int port2 = port1 + 1;
+
+    std::string header = "Transport: RTP/AVP;unicast;client_port=" +
+                         std::to_string(port1) + "-" + std::to_string(port2) + "\r\n";
+
+    Logger::info("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
+
+    std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path + "/" + track;
+    push_request_into_queue(RtspMethod::SETUP, url, header, "");
+
+    build_and_send_request();
+}
+
+void RTSPClient::send_rtsp_play()
+{
+    std::string header = "Range: npt=0.000-\r\n";
+    std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
+    push_request_into_queue(RtspMethod::PLAY, url, header);
+    build_and_send_request();
 }

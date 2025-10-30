@@ -3,7 +3,7 @@
 #include <string>
 #include "../include/3rd/json.hpp"
 
-class ParseURL
+class httpParser
 {
 public:
     static bool parse_http_url(const std::string &url, std::string &rtsp_url);

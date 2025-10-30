@@ -1,9 +1,9 @@
-#include "../include/handle.h"
+#include "../include/http_handle.h"
 #include "../include/logger.h"
 #include "../include/epoll_loop.h"
 #include "../include/rtsp_client.h"
 #include "../include/buffer_pool.h"
-#include "../include/parse_url.h"
+#include "../include/http_parser.h"
 #include "../include/server_config.h"
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -121,7 +121,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     std::string rtsp_url;
 
-    if (!ParseURL::parse_http_url(url, rtsp_url))
+    if (!httpParser::parse_http_url(url, rtsp_url))
     {
 
         Logger::error(std::string("[SERVER] Failed to parse http url: ") + url);

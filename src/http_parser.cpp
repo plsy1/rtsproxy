@@ -1,4 +1,4 @@
-#include "parse_url.h"
+#include "../include/http_parser.h"
 #include "../include/3rd/json.hpp"
 #include "../include/logger.h"
 #include <fstream>
@@ -8,9 +8,9 @@
 
 using json = nlohmann::json;
 
-nlohmann::json ParseURL::parseConfig;
+nlohmann::json httpParser::parseConfig;
 
-std::string ParseURL::simplifyToRegex(const std::string &match_pattern)
+std::string httpParser::simplifyToRegex(const std::string &match_pattern)
 {
 
     std::string regex_pattern = match_pattern;
@@ -43,7 +43,7 @@ std::string ParseURL::simplifyToRegex(const std::string &match_pattern)
     return regex_pattern;
 }
 
-std::string ParseURL::shiftTime(const std::string &time_str, int shift_hours)
+std::string httpParser::shiftTime(const std::string &time_str, int shift_hours)
 {
     if (time_str.length() == 14)
     {
@@ -77,7 +77,7 @@ std::string ParseURL::shiftTime(const std::string &time_str, int shift_hours)
     }
 }
 
-void ParseURL::shiftTimeInString(std::string &input, const std::string &regex_pattern, int shift_hours)
+void httpParser::shiftTimeInString(std::string &input, const std::string &regex_pattern, int shift_hours)
 {
 
     std::regex rgx(regex_pattern);
@@ -107,7 +107,7 @@ void ParseURL::shiftTimeInString(std::string &input, const std::string &regex_pa
     input.replace(match.position(0), match.length(0), replaced);
 }
 
-std::vector<std::string> ParseURL::split(const std::string &str, char delimiter)
+std::vector<std::string> httpParser::split(const std::string &str, char delimiter)
 {
     std::vector<std::string> tokens;
     size_t start = 0;
@@ -124,7 +124,7 @@ std::vector<std::string> ParseURL::split(const std::string &str, char delimiter)
     return tokens;
 }
 
-std::string ParseURL::join(const std::vector<std::string> &parts, const std::string &delimiter)
+std::string httpParser::join(const std::vector<std::string> &parts, const std::string &delimiter)
 {
     std::string result;
     for (size_t i = 0; i < parts.size(); ++i)
@@ -138,7 +138,7 @@ std::string ParseURL::join(const std::vector<std::string> &parts, const std::str
     return result;
 }
 
-bool ParseURL::load_json(const std::string jsonPath)
+bool httpParser::load_json(const std::string jsonPath)
 {
 
     std::ifstream ifs(jsonPath);
@@ -153,7 +153,7 @@ bool ParseURL::load_json(const std::string jsonPath)
     return true;
 }
 
-bool ParseURL::parse_rtp_url(const std::string &url, std::string &rtsp_url)
+bool httpParser::parse_rtp_url(const std::string &url, std::string &rtsp_url)
 {
     rtsp_url = url.substr(5);
     rtsp_url = "rtsp://" + rtsp_url;
@@ -161,7 +161,7 @@ bool ParseURL::parse_rtp_url(const std::string &url, std::string &rtsp_url)
     return true;
 }
 
-bool ParseURL::parse_tv_url(const std::string &url, std::string &rtsp_url)
+bool httpParser::parse_tv_url(const std::string &url, std::string &rtsp_url)
 {
 
     size_t query_pos = url.find('?');
@@ -218,7 +218,7 @@ bool ParseURL::parse_tv_url(const std::string &url, std::string &rtsp_url)
     }
 }
 
-bool ParseURL::parse_http_url(const std::string &url, std::string &rtsp_url)
+bool httpParser::parse_http_url(const std::string &url, std::string &rtsp_url)
 {
     std::string clean_url = url;
     size_t qpos = clean_url.find('?');
