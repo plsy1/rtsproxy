@@ -138,10 +138,10 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     loop->add_client_to_map(client_fd, std::move(client));
 
-    loop->get_client_from_map(client_fd)->set_on_closed_callback([&client_fd, &loop, client_host]()
+    loop->get_client_from_map(client_fd)->set_on_closed_callback([client_fd, &loop, client_host]()
                                                                  {
     Logger::info("[SERVER] Client disconnect: " + client_host);
-    loop->add_task([&client_fd, &loop]()
+    loop->add_task([client_fd, &loop]()
     {
         loop->remove_client_from_map(client_fd);
     }); });

@@ -141,6 +141,13 @@ RTSPClient *EpollLoop::get_client_from_map(int client_fd)
 
 void EpollLoop::add_client_to_map(int client_fd, std::unique_ptr<RTSPClient> client)
 {
+    auto it = client_ptr_map.find(client_fd);
+    if (it != client_ptr_map.end())
+    {
+        Logger::warn("Client FD already exists, skipping add: " + std::to_string(client_fd));
+        return;
+    }
+
     client_ptr_map[client_fd] = std::move(client);
 }
 

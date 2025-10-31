@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <unistd.h>
 #include <string>
+#include <random>
+#include <chrono>
 
 int create_listen_socket(int port)
 {
@@ -50,17 +52,12 @@ int create_nonblocking_tcp(const std::string &ip, uint16_t port)
 
 uint16_t get_random_port()
 {
-    static int initialized = 0;
-    if (!initialized)
-    {
-        srand(time(NULL) ^ getpid());
-        initialized = 1;
-    }
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(10000, 60000);
 
-    int port = 10000 + (rand() % 25000) * 2;
-    return port;
+    return dis(gen);
 }
-
 int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts)
 {
     sockaddr_in addr{};

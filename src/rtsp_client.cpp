@@ -20,10 +20,10 @@
 RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const std::string &rtsp_url)
     : loop(loop),
       buffer_pool_(pool),
-      client_addr_(client_addr),
-      client_fd_(client_fd, loop),
       client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
-                                              { handle_client(event); }))
+                                              { handle_client(event); })),
+      client_addr_(client_addr),
+      client_fd_(client_fd, loop)
 {
 
     ctx.rtsp_url = rtsp_url;
@@ -429,7 +429,8 @@ void RTSPClient::send_rtp_trigger()
     }
 }
 
-void RTSPClient::init_timer_fd() {
+void RTSPClient::init_timer_fd()
+{
     using namespace std::chrono;
 
     timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -443,7 +444,8 @@ void RTSPClient::init_timer_fd() {
 
     timer_ctx = std::make_unique<SocketCtx>(
         timer_fd_,
-        [this](uint32_t event) { handle_timer(event); });
+        [this](uint32_t event)
+        { handle_timer(event); });
 
     loop->set(timer_ctx.get(), timer_fd_, EPOLLIN);
 }
