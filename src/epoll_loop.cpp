@@ -55,18 +55,40 @@ void EpollLoop::remove(int fd)
     {
         Logger::error("epoll_ctl EPOLL_CTL_DEL failed");
     }
-    else
-    {
-        // Logger::debug("Remove socket form epoll success");
-    }
+
+    ctx_ptr_map.erase(fd);
 }
 
 void EpollLoop::set(SocketCtx *ctx, int fd, uint32_t events)
 {
-    
+
     struct epoll_event ev;
     ev.events = events;
     ev.data.ptr = ctx;
+
+    if (epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &ev) == -1)
+    {
+        if (errno == EEXIST)
+        {
+            if (epoll_ctl(epfd_, EPOLL_CTL_MOD, fd, &ev) < 0)
+            {
+                Logger::error(std::string("epoll_ctl EPOLL_CTL_MOD failed: ") + strerror(errno));
+            }
+        }
+        else
+        {
+            Logger::error(std::string("epoll_ctl EPOLL_CTL_ADD failed: ") + strerror(errno));
+        }
+    }
+}
+
+void EpollLoop::set(std::unique_ptr<SocketCtx> ctx, int fd, uint32_t events)
+{
+    struct epoll_event ev;
+    ev.events = events;
+    ev.data.ptr = ctx.get();
+
+    ctx_ptr_map[fd] = std::move(ctx);
 
     if (epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &ev) == -1)
     {
@@ -105,4 +127,24 @@ void EpollLoop::loop(int timeout_ms)
         }
         process_tasks();
     }
+}
+
+RTSPClient *EpollLoop::get_client_from_map(int client_fd)
+{
+    auto it = client_ptr_map.find(client_fd);
+    if (it != client_ptr_map.end())
+    {
+        return it->second.get();
+    }
+    return nullptr;
+}
+
+void EpollLoop::add_client_to_map(int client_fd, std::unique_ptr<RTSPClient> client)
+{
+    client_ptr_map[client_fd] = std::move(client);
+}
+
+void EpollLoop::remove_client_from_map(int client_fd)
+{
+    client_ptr_map.erase(client_fd);
 }

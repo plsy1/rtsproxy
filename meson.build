@@ -31,6 +31,7 @@ executable(
         src_dir / 'logger.cpp',
         src_dir / 'server_config.cpp',
         src_dir / 'http_parser.cpp',
+        src_dir / 'socket_helper.cpp',
     ),
     include_directories: include_directories(inc_dir),
    install: true,

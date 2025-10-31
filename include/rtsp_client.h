@@ -1,13 +1,14 @@
 #pragma once
 
 #include "../include/common/rtsp_ctx.h"
-
 #include <string>
 #include <queue>
 #include <vector>
 #include <map>
 #include <netinet/in.h>
+#include <unistd.h>
 #include <functional>
+#include <memory>
 
 class EpollLoop;
 class BufferPool;
@@ -57,6 +58,29 @@ private:
     };
 
 private:
+    class FdGuard
+    {
+    public:
+        FdGuard();
+        FdGuard(int fd, EpollLoop *loop = nullptr);
+        ~FdGuard();
+
+        FdGuard(const FdGuard &) = delete;
+        FdGuard &operator=(const FdGuard &) = delete;
+
+        FdGuard(FdGuard &&other) noexcept;
+        FdGuard &operator=(FdGuard &&other) noexcept;
+
+        int &get_ref();
+        int get() const;
+        operator int() const;
+
+    private:
+        int fd_{-1};
+        EpollLoop *loop_{nullptr};
+    };
+
+private:
     void init_rtp_rtcp_sockets();
     void init_rtp_rtcp_server_addr();
     void init_timer_fd();
@@ -66,8 +90,6 @@ private:
     void send_rtp_trigger();
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
-    uint16_t get_random_rtp_port();
-    bool bind_udp_socket(int &fd, uint16_t &port);
 
     void handle_rtsp(uint32_t event);
     void handle_rtp(uint32_t event);
@@ -89,17 +111,19 @@ private:
     void send_rtsp_describe();
     void send_rtsp_setup();
     void send_rtsp_play();
-    
+
     std::string RtspMethodToString(RtspMethod method);
 
 private:
     EpollLoop *loop;
     BufferPool &buffer_pool_;
-    SocketCtx *rtsp_ctx_ = nullptr;
-    SocketCtx *rtp_ctx_ = nullptr;
-    SocketCtx *rtcp_ctx_ = nullptr;
-    SocketCtx *client_ctx_ = nullptr;
-    SocketCtx *timer_ctx = nullptr;
+
+    std::unique_ptr<SocketCtx> client_ctx_;
+    std::unique_ptr<SocketCtx> rtsp_ctx_;
+    std::unique_ptr<SocketCtx> rtp_ctx_;
+    std::unique_ptr<SocketCtx> rtcp_ctx_;
+    std::unique_ptr<SocketCtx> timer_ctx;
+
     ClosedCallback on_closed_callback_;
 
     sockaddr_in client_addr_;
@@ -114,11 +138,11 @@ private:
     size_t tcp_send_offset_ = 0;
     size_t payload_offset = 0;
 
-    int client_fd_ = -1;
-    int rtsp_fd_ = -1;
-    int rtp_fd_ = -1;
-    int rtcp_fd_ = -1;
-    int timer_fd = -1;
+    FdGuard client_fd_;
+    FdGuard rtsp_fd_;
+    FdGuard rtp_fd_;
+    FdGuard rtcp_fd_;
+    FdGuard timer_fd_;
 
     RtspState state_ = RtspState::DISCONNECTED;
 

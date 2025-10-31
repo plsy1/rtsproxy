@@ -8,11 +8,10 @@
 #include "../include/stun_client.h"
 #include "../include/utils.h"
 #include "../include/rtsp_parser.h"
-
+#include "../include/socket_helper.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <algorithm>
 #include <cstring>
 #include <sys/timerfd.h>
@@ -22,20 +21,21 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
     : loop(loop),
       buffer_pool_(pool),
       client_addr_(client_addr),
-      client_fd_(client_fd)
+      client_fd_(client_fd, loop),
+      client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
+                                              { handle_client(event); }))
 {
 
     ctx.rtsp_url = rtsp_url;
+
+    loop->remove(client_fd);
 
     if (rtspParser::parse_url(rtsp_url, ctx) != 0)
     {
         on_closed_callback_();
     }
 
-    client_ctx_ = new SocketCtx{
-        client_fd_,
-        std::bind(&RTSPClient::handle_client, this, std::placeholders::_1)};
-    loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
+    loop->set(client_ctx_.get(), client_fd, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
 
     send_http_response();
     init_rtp_rtcp_sockets();
@@ -57,63 +57,6 @@ void RTSPClient::set_on_closed_callback(ClosedCallback cb)
 
 RTSPClient::~RTSPClient()
 {
-
-    if (rtsp_ctx_)
-    {
-        delete rtsp_ctx_;
-        rtsp_ctx_ = nullptr;
-    }
-
-    if (rtp_ctx_)
-    {
-        delete rtp_ctx_;
-        rtp_ctx_ = nullptr;
-    }
-
-    if (rtcp_ctx_)
-    {
-        delete rtcp_ctx_;
-        rtcp_ctx_ = nullptr;
-    }
-
-    if (client_ctx_)
-    {
-        delete client_ctx_;
-        client_ctx_ = nullptr;
-    }
-
-    if (timer_ctx)
-    {
-        delete timer_ctx;
-        timer_ctx = nullptr;
-    }
-
-    if (client_fd_ >= 0)
-    {
-        loop->remove(client_fd_);
-        close(client_fd_);
-    }
-    if (rtsp_fd_ >= 0)
-    {
-        loop->remove(rtsp_fd_);
-        close(rtsp_fd_);
-    }
-    if (rtp_fd_ >= 0)
-    {
-        loop->remove(rtp_fd_);
-        close(rtp_fd_);
-    }
-    if (rtcp_fd_ >= 0)
-    {
-        loop->remove(rtcp_fd_);
-        close(rtcp_fd_);
-    }
-    if (timer_fd >= 0)
-    {
-        loop->remove(timer_fd);
-        close(timer_fd);
-    }
-
     for (auto &packet : send_queue_)
     {
         buffer_pool_.release(std::move(packet.data));
@@ -123,26 +66,20 @@ RTSPClient::~RTSPClient()
 
 void RTSPClient::connect_server()
 {
-    rtsp_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(ctx.server_rtsp_port);
-    inet_pton(AF_INET, ctx.server_ip.c_str(), &addr.sin_addr);
+    rtsp_fd_ = create_nonblocking_tcp(ctx.server_ip, ctx.server_rtsp_port);
 
-    fcntl(rtsp_fd_, F_SETFL, O_NONBLOCK);
-
-    rtsp_ctx_ = new SocketCtx{rtsp_fd_, std::bind(&RTSPClient::handle_rtsp, this, std::placeholders::_1)};
-
-    int res = connect(rtsp_fd_, (struct sockaddr *)&addr, sizeof(addr));
-    if (res < 0 && errno != EINPROGRESS)
+    if (rtsp_fd_ < 0)
     {
         Logger::error("[RTSP] Connect to upstream failed.");
-        close(rtsp_fd_);
-        rtsp_fd_ = -1;
-        return;
+        on_closed_callback_();
     }
 
-    loop->set(rtsp_ctx_, rtsp_fd_, EPOLLOUT);
+    rtsp_ctx_ = std::make_unique<SocketCtx>(
+        rtsp_fd_,
+        [this](uint32_t event)
+        { handle_rtsp(event); });
+
+    loop->set(rtsp_ctx_.get(), rtsp_fd_, EPOLLOUT);
 
     state_ = RtspState::CONNECTING;
 }
@@ -205,7 +142,7 @@ void RTSPClient::handle_timer(uint32_t event)
     if (event & EPOLLIN)
     {
         uint64_t expirations;
-        read(timer_fd, &expirations, sizeof(expirations));
+        read(timer_fd_, &expirations, sizeof(expirations));
         push_request_into_queue(RtspMethod::GET_PARAMETER, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path);
         build_and_send_request();
     }
@@ -235,7 +172,7 @@ void RTSPClient::on_rtsp_writable()
         tcp_send_offset_ += n;
         if (tcp_send_offset_ == req_buf_.size())
         {
-            loop->set(rtsp_ctx_, rtsp_fd_, EPOLLIN);
+            loop->set(rtsp_ctx_.get(), rtsp_fd_, EPOLLIN);
             tcp_send_offset_ = 0;
         }
     }
@@ -347,7 +284,7 @@ void RTSPClient::on_rtp_readable()
             {
                 Logger::info("[RTP] Extract STUN mapping success: " + nat_wan_ip + ":" + std::to_string(nat_wan_port));
             };
-            loop->set(rtp_ctx_, rtp_fd_, EPOLLIN);
+            loop->set(rtp_ctx_.get(), rtp_fd_, EPOLLIN);
         }
         buffer_pool_.release(std::move(buf));
         is_init_ok = true;
@@ -360,7 +297,7 @@ void RTSPClient::on_rtp_readable()
     }
 
     if (loop && client_fd_ >= 0 && client_ctx_)
-        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
+        loop->set(client_ctx_.get(), client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
 }
 
 void RTSPClient::on_rtcp_writable()
@@ -402,7 +339,7 @@ void RTSPClient::on_client_writable()
     }
 
     if (send_queue_.empty())
-        loop->set(client_ctx_, client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
+        loop->set(client_ctx_.get(), client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
 }
 
 void RTSPClient::on_client_readable()
@@ -438,65 +375,36 @@ void RTSPClient::build_and_send_request()
             req_buf_ += "\r\n";
 
         tcp_send_offset_ = 0;
-        loop->set(rtsp_ctx_, rtsp_fd_, EPOLLOUT);
+        loop->set(rtsp_ctx_.get(), rtsp_fd_, EPOLLOUT);
     }
-}
-
-bool RTSPClient::bind_udp_socket(int &fd, uint16_t &port)
-{
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-
-    const int max_attempts = 10;
-    for (int i = 0; i < max_attempts; ++i)
-    {
-        fd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (fd < 0)
-            return false;
-
-        port = get_random_rtp_port();
-        addr.sin_port = htons(port);
-
-        if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
-        {
-            fcntl(fd, F_SETFL, O_NONBLOCK);
-            return true;
-        }
-
-        close(fd);
-    }
-
-    return false;
 }
 
 void RTSPClient::init_rtp_rtcp_sockets()
 {
-    if (!bind_udp_socket(rtp_fd_, rtp_port_))
+    if (bind_udp_socket_with_retry(rtp_fd_.get_ref(), rtp_port_, 3) < 0)
     {
         Logger::error("[RTP] Failed to bind RTP socket after multiple attempts");
-        return;
+        on_closed_callback_();
     }
 
-    uint16_t rtcp_port = rtp_port_ + 1;
-    sockaddr_in rtcp_addr{};
-    rtcp_addr.sin_family = AF_INET;
-    rtcp_addr.sin_port = htons(rtcp_port);
-    rtcp_addr.sin_addr.s_addr = INADDR_ANY;
-
-    rtcp_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (bind(rtcp_fd_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr)) < 0)
+    if (bind_udp_socket(rtcp_fd_.get_ref(), rtp_port_ + 1) < 0)
     {
         Logger::error("[RTP] Failed to bind RTCP socket");
         on_closed_callback_();
     }
-    fcntl(rtcp_fd_, F_SETFL, O_NONBLOCK);
 
-    rtp_ctx_ = new SocketCtx{rtp_fd_, std::bind(&RTSPClient::handle_rtp, this, std::placeholders::_1)};
-    rtcp_ctx_ = new SocketCtx{rtcp_fd_, std::bind(&RTSPClient::handle_rtcp, this, std::placeholders::_1)};
+    rtp_ctx_ = std::make_unique<SocketCtx>(
+        rtp_fd_,
+        [this](uint32_t event)
+        { handle_rtp(event); });
 
-    loop->set(rtp_ctx_, rtp_fd_, EPOLLIN);
-    loop->set(rtcp_ctx_, rtcp_fd_, EPOLLIN);
+    rtcp_ctx_ = std::make_unique<SocketCtx>(
+        rtcp_fd_,
+        [this](uint32_t event)
+        { handle_rtcp(event); });
+
+    loop->set(rtp_ctx_.get(), rtp_fd_, EPOLLIN);
+    loop->set(rtcp_ctx_.get(), rtcp_fd_, EPOLLIN);
 }
 
 void RTSPClient::init_rtp_rtcp_server_addr()
@@ -521,21 +429,23 @@ void RTSPClient::send_rtp_trigger()
     }
 }
 
-void RTSPClient::init_timer_fd()
-{
-    timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    struct itimerspec its{};
-    its.it_value.tv_sec = 20;
-    its.it_value.tv_nsec = 0;
-    its.it_interval.tv_sec = 20;
-    its.it_interval.tv_nsec = 0;
+void RTSPClient::init_timer_fd() {
+    using namespace std::chrono;
 
-    timerfd_settime(timer_fd, 0, &its, nullptr);
+    timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    itimerspec its{};
+    auto interval = seconds(20);
 
-    timer_ctx = new SocketCtx{
-        timer_fd,
-        std::bind(&RTSPClient::handle_timer, this, std::placeholders::_1)};
-    loop->set(timer_ctx, timer_fd, EPOLLIN);
+    its.it_value.tv_sec = interval.count();
+    its.it_interval.tv_sec = interval.count();
+
+    timerfd_settime(timer_fd_, 0, &its, nullptr);
+
+    timer_ctx = std::make_unique<SocketCtx>(
+        timer_fd_,
+        [this](uint32_t event) { handle_timer(event); });
+
+    loop->set(timer_ctx.get(), timer_fd_, EPOLLIN);
 }
 
 void RTSPClient::send_http_response()
@@ -595,19 +505,6 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
     payload_offset = recv_len - payload_len;
 
     return true;
-}
-
-uint16_t RTSPClient::get_random_rtp_port()
-{
-    static int initialized = 0;
-    if (!initialized)
-    {
-        srand(time(NULL) ^ getpid());
-        initialized = 1;
-    }
-
-    int port = 10000 + (rand() % 25000) * 2;
-    return port;
 }
 
 std::string RTSPClient::RtspMethodToString(RtspMethod method)
@@ -691,3 +588,50 @@ void RTSPClient::send_rtsp_play()
     push_request_into_queue(RtspMethod::PLAY, url, header);
     build_and_send_request();
 }
+
+//////////////////////////////
+// FdGuard
+//////////////////////////////
+
+RTSPClient::FdGuard::FdGuard() = default;
+
+RTSPClient::FdGuard::FdGuard(int fd, EpollLoop *loop) : fd_(fd), loop_(loop) {}
+
+RTSPClient::FdGuard::~FdGuard()
+{
+    if (fd_ >= 0)
+    {
+        if (loop_)
+            loop_->remove(fd_);
+        close(fd_);
+    }
+}
+
+RTSPClient::FdGuard::FdGuard(FdGuard &&other) noexcept
+    : fd_(other.fd_), loop_(other.loop_)
+{
+    other.fd_ = -1;
+    other.loop_ = nullptr;
+}
+
+RTSPClient::FdGuard &RTSPClient::FdGuard::operator=(FdGuard &&other) noexcept
+{
+    if (this != &other)
+    {
+        if (fd_ >= 0)
+        {
+            if (loop_)
+                loop_->remove(fd_);
+            close(fd_);
+        }
+        fd_ = other.fd_;
+        loop_ = other.loop_;
+        other.fd_ = -1;
+        other.loop_ = nullptr;
+    }
+    return *this;
+}
+
+int &RTSPClient::FdGuard::get_ref() { return fd_; }
+int RTSPClient::FdGuard::get() const { return fd_; }
+RTSPClient::FdGuard::operator int() const { return fd_; }

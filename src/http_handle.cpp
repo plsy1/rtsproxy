@@ -134,12 +134,15 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     Logger::info("[SERVER] New http client request: " + client_host + " -> " + rtsp_url);
 
-    RTSPClient *client = new RTSPClient(loop, pool, client_addr, client_fd, rtsp_url);
+    auto client = std::make_unique<RTSPClient>(loop, pool, client_addr, client_fd, rtsp_url);
 
-    client->set_on_closed_callback([client, client_host, loop]()
-                                   {
+    loop->add_client_to_map(client_fd, std::move(client));
+
+    loop->get_client_from_map(client_fd)->set_on_closed_callback([&client_fd, &loop, client_host]()
+                                                                 {
     Logger::info("[SERVER] Client disconnect: " + client_host);
-    loop->add_task([client]()
-                {delete client;}
-                                ); });
+    loop->add_task([&client_fd, &loop]()
+    {
+        loop->remove_client_from_map(client_fd);
+    }); });
 }

@@ -5,34 +5,13 @@
 #include "../include/buffer_pool.h"
 #include "../include/common/socket_ctx.h"
 #include "../include/http_parser.h"
+#include "../include/socket_helper.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <getopt.h>
-
-int create_listen_socket(int port)
-{
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-        return -1;
-
-    int opt = 1;
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port);
-
-    if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-        return -1;
-    if (listen(sockfd, 5) < 0)
-        return -1;
-
-    return sockfd;
-}
 
 int main(int argc, char *argv[])
 {
@@ -113,8 +92,6 @@ int main(int argc, char *argv[])
     if (listen_fd < 0)
         return -1;
 
-    fcntl(listen_fd, F_SETFL, O_NONBLOCK);
-
     auto accept_handler = [&](uint32_t events)
     {
         [[maybe_unused]] uint32_t unused_events = events;
@@ -132,15 +109,15 @@ int main(int argc, char *argv[])
             }
             fcntl(client_fd, F_SETFL, O_NONBLOCK);
 
-            auto ctx = std::make_shared<SocketCtx>();
+            auto ctx = std::make_unique<SocketCtx>();
             ctx->fd = client_fd;
-            ctx->handler = [ctx, client_addr, &loop, &pool](uint32_t e)
+            ctx->handler = [client_fd, client_addr, &loop, &pool](uint32_t e)
             {
                 [[maybe_unused]] uint32_t unused_events = e;
-                if (ctx->fd >= 0)
+                if (client_fd)
                 {
-                    Logger::debug("[SERVER] Handling request for client_fd: " + std::to_string(ctx->fd));
-                    handle_http_request(ctx->fd, client_addr, &loop, pool);
+                    Logger::debug("[SERVER] Handling request for client_fd: " + std::to_string(client_fd));
+                    handle_http_request(client_fd, client_addr, &loop, pool);
                 }
                 else
                 {
@@ -148,13 +125,15 @@ int main(int argc, char *argv[])
                 }
             };
 
-            loop.set(ctx.get(), client_fd, EPOLLIN);
+            loop.set(std::move(ctx), client_fd, EPOLLIN);
         }
     };
 
-    auto listen_ctx = std::make_shared<SocketCtx>();
-    listen_ctx->fd = listen_fd;
-    listen_ctx->handler = accept_handler;
+    auto listen_ctx = std::make_unique<SocketCtx>(
+        listen_fd,
+        [&](uint32_t event)
+        { accept_handler(event); });
+
     loop.set(listen_ctx.get(), listen_fd, EPOLLIN);
 
     Logger::info("[SERVER] HTTP server listening on port " + std::to_string(listen_port));

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <map>
+#include <vector>
 
 struct Media
 {
@@ -38,4 +38,6 @@ struct rtspCtx
     std::string rtsp_url;
 
     sdpCtx sdp;
+
+    rtspCtx() = default;
 };
