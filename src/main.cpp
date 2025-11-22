@@ -25,6 +25,7 @@ int main(int argc, char *argv[])
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
             {"set-auth-token", required_argument, nullptr, 't'},
+            {"set-interface", required_argument, nullptr, 'i'},
             {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
@@ -33,7 +34,7 @@ int main(int argc, char *argv[])
             {nullptr, 0, nullptr, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:kd", long_options, nullptr)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kd", long_options, nullptr)) != -1)
     {
         switch (opt)
         {
@@ -54,6 +55,9 @@ int main(int argc, char *argv[])
             break;
         case 'j':
             ServerConfig::setJsonPath(optarg);
+            break;
+        case 'i':
+            ServerConfig::setInterface(optarg);
             break;
         case 'k':
             ServerConfig::kill_previous_instance();

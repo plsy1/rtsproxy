@@ -66,7 +66,7 @@ RTSPClient::~RTSPClient()
 
 void RTSPClient::connect_server()
 {
-    rtsp_fd_ = create_nonblocking_tcp(ctx.server_ip, ctx.server_rtsp_port);
+    rtsp_fd_ = create_nonblocking_tcp(ctx.server_ip, ctx.server_rtsp_port, ServerConfig::getInterface());
 
     if (rtsp_fd_ < 0)
     {
@@ -381,13 +381,13 @@ void RTSPClient::build_and_send_request()
 
 void RTSPClient::init_rtp_rtcp_sockets()
 {
-    if (bind_udp_socket_with_retry(rtp_fd_.get_ref(), rtp_port_, 3) < 0)
+    if (bind_udp_socket_with_retry(rtp_fd_.get_ref(), rtp_port_, 3, ServerConfig::getInterface()) < 0)
     {
         Logger::error("[RTP] Failed to bind RTP socket after multiple attempts");
         on_closed_callback_();
     }
 
-    if (bind_udp_socket(rtcp_fd_.get_ref(), rtp_port_ + 1) < 0)
+    if (bind_udp_socket(rtcp_fd_.get_ref(), rtp_port_ + 1, ServerConfig::getInterface()) < 0)
     {
         Logger::error("[RTP] Failed to bind RTCP socket");
         on_closed_callback_();

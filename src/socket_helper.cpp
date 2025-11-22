@@ -33,11 +33,20 @@ int create_listen_socket(int port)
     return sockfd;
 }
 
-int create_nonblocking_tcp(const std::string &ip, uint16_t port)
+int create_nonblocking_tcp(const std::string &ip, uint16_t port, const std::string &iface = "")
 {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     fcntl(sockfd, F_SETFL, O_NONBLOCK);
+
+    if (!iface.empty())
+    {
+        if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, iface.c_str(), iface.length()) < 0)
+        {
+            close(sockfd);
+            return -1;
+        }
+    }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -58,7 +67,7 @@ uint16_t get_random_port()
 
     return dis(gen);
 }
-int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts)
+int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts, const std::string &iface = "")
 {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -76,6 +85,14 @@ int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts)
         if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
         {
             fcntl(fd, F_SETFL, O_NONBLOCK);
+            if (!iface.empty())
+            {
+                if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, iface.c_str(), iface.length()) < 0)
+                {
+                    close(fd);
+                    return -1;
+                }
+            }
             return 0;
         }
 
@@ -85,11 +102,12 @@ int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts)
     return -1;
 }
 
-int bind_udp_socket(int &fd, const uint16_t &port)
+int bind_udp_socket(int &fd, const uint16_t &port, const std::string &iface = "")
 {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
 
     fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0)
@@ -97,7 +115,14 @@ int bind_udp_socket(int &fd, const uint16_t &port)
 
     fcntl(fd, F_SETFL, O_NONBLOCK);
 
-    addr.sin_port = htons(port);
+    if (!iface.empty())
+    {
+        if (setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, iface.c_str(), iface.length()) < 0)
+        {
+            close(fd);
+            return -1;
+        }
+    }
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
         return -1;

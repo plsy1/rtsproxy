@@ -40,6 +40,6 @@
 # debug information files
 *.dwo
 
-cross.ini
+musl-crossfile-x86_64.ini
 .vscode
 bin

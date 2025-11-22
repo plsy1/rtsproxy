@@ -14,6 +14,7 @@ int ServerConfig::stun_server_port = 19302;
 std::string ServerConfig::stun_server_host = "stun.l.google.com";
 std::string ServerConfig::json_path = "config.json";
 std::string ServerConfig::auth_token = "";
+std::string ServerConfig::upstream_interface = "";
 
 void ServerConfig::setPort(int p)
 {
@@ -56,6 +57,11 @@ void ServerConfig::setToken(std::string token)
     auth_token = token;
 }
 
+void ServerConfig::setInterface(std::string iface)
+{
+    upstream_interface = iface;
+}
+
 int ServerConfig::getPort()
 {
     return port;
@@ -96,6 +102,11 @@ std::string ServerConfig::getToken()
     return auth_token;
 }
 
+std::string ServerConfig::getInterface()
+{
+    return upstream_interface;
+}
+
 void ServerConfig::printUsage(const std::string &program_name)
 {
     std::cout << "Usage: " << program_name << " [options]" << std::endl;
@@ -105,6 +116,7 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
     std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;
+    std::cout << "  -i, --set-interface   <iface> Set upstream interface" << std::endl;
     std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
