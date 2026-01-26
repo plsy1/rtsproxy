@@ -231,10 +231,9 @@ jobs:
         run: |
           sudo apt-get install -y upx
           chmod +x release/rtsproxy-*
-          for file in release/rtsproxy-*; do
-          if [[ ! "$file" =~ \.tar\.xz$ ]]; then
-              upx --best --lzma "$file"
-          fi
+          for file in release/rtsproxy-linux-arm* release/rtsproxy-linux-x86_64*; do
+            [ -f "$file" ] || continue
+            upx --best --lzma "$file"
           done
       - name: Upload release assets
         env:
