@@ -191,4 +191,5 @@ private:
     std::string upstream_uri_base_;  // e.g. "rtsp://112.245.125.44:1554"
 
     // Removed rtp_buf_ in favor of BufferPool for consistency with RTSPClient
+    uint8_t rtp_relay_buf_[65536];
 };

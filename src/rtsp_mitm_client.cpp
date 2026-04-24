@@ -489,22 +489,20 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
 {
     while (true)
     {
-        auto buf = pool_.acquire();
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtp_us_fd_, buf.get(), ServerConfig::getUdpPacketSize(), 0,
+        // Use full 64KB capacity to avoid truncation (crucial for some streams)
+        ssize_t n = recvfrom(rtp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0) {
-            pool_.release(std::move(buf));
+        if (n <= 0)
             break;
-        }
 
         if (src.sin_port == server_rtp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
             if (client_rtp_addr_.sin_port != 0)
             {
-                sendto(rtp_us_fd_, buf.get(), n, 0,
+                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
             }
         }
@@ -516,11 +514,10 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
 
             if (server_rtp_addr_.sin_port != 0)
             {
-                sendto(rtp_us_fd_, buf.get(), n, 0,
+                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
             }
         }
-        pool_.release(std::move(buf));
     }
 }
 
@@ -528,22 +525,19 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
 {
     while (true)
     {
-        auto buf = pool_.acquire();
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtcp_us_fd_, buf.get(), ServerConfig::getUdpPacketSize(), 0,
+        ssize_t n = recvfrom(rtcp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0) {
-            pool_.release(std::move(buf));
+        if (n <= 0)
             break;
-        }
 
         if (src.sin_port == server_rtcp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
             if (client_rtcp_addr_.sin_port != 0)
             {
-                sendto(rtcp_us_fd_, buf.get(), n, 0,
+                sendto(rtcp_us_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
             }
         }
@@ -555,11 +549,10 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
 
             if (server_rtcp_addr_.sin_port != 0)
             {
-                sendto(rtcp_us_fd_, buf.get(), n, 0,
+                sendto(rtcp_us_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
             }
         }
-        pool_.release(std::move(buf));
     }
 }
 
