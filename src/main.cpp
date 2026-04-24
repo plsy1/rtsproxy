@@ -125,14 +125,22 @@ int main(int argc, char *argv[])
             ctx->handler = [client_fd, client_addr, &loop, &pool](uint32_t e)
             {
                 [[maybe_unused]] uint32_t unused_events = e;
-                if (client_fd)
+                if (client_fd >= 0)
                 {
-                    Logger::debug("[SERVER] Handling request for client_fd: " + std::to_string(client_fd));
-                    handle_http_request(client_fd, client_addr, &loop, pool);
-                }
-                else
-                {
-                    Logger::error("[SERVER] Invalid client_fd, cannot handle request");
+                    // Peek at the first few bytes to determine protocol
+                    char peek_buf[16];
+                    ssize_t n = recv(client_fd, peek_buf, sizeof(peek_buf) - 1, MSG_PEEK);
+                    if (n > 0) {
+                        peek_buf[n] = 0;
+                        std::string start(peek_buf);
+                        // HTTP typically starts with GET, POST, HEAD, or has HTTP/1.1
+                        if (start.find("GET ") == 0 || start.find("POST") == 0 || start.find("HTTP") != std::string::npos) {
+                            handle_http_request(client_fd, client_addr, &loop, pool);
+                        } else {
+                            // Assume RTSP for other methods like OPTIONS, DESCRIBE, SETUP...
+                            handle_rtsp_request(client_fd, client_addr, &loop, pool);
+                        }
+                    }
                 }
             };
 
@@ -147,59 +155,7 @@ int main(int argc, char *argv[])
 
     loop.set(listen_ctx.get(), listen_fd, EPOLLIN);
 
-    Logger::info("[SERVER] HTTP server listening on port " + std::to_string(listen_port));
-
-    // ------------------------------------------------------------------ //
-    // Optional: RTSP MITM proxy listener                                  //
-    // ------------------------------------------------------------------ //
-    int rtsp_listen_port = ServerConfig::getRtspPort();
-    int rtsp_listen_fd = -1;
-    std::unique_ptr<SocketCtx> rtsp_listen_ctx;
-
-    if (rtsp_listen_port > 0)
-    {
-        rtsp_listen_fd = create_listen_socket(rtsp_listen_port);
-        if (rtsp_listen_fd < 0)
-        {
-            Logger::error("[SERVER] Failed to create RTSP listen socket on port " +
-                          std::to_string(rtsp_listen_port));
-            return -1;
-        }
-
-        rtsp_listen_ctx = std::make_unique<SocketCtx>(
-            rtsp_listen_fd,
-            [&, rtsp_listen_fd](uint32_t events)
-            {
-                [[maybe_unused]] uint32_t unused_events = events;
-                while (true)
-                {
-                    sockaddr_in client_addr{};
-                    socklen_t len = sizeof(client_addr);
-                    int client_fd = accept(rtsp_listen_fd, (sockaddr *)&client_addr, &len);
-                    if (client_fd < 0)
-                    {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK)
-                            break;
-                        Logger::error("[RTSP-MITM] Accept failed: " + std::string(strerror(errno)));
-                        break;
-                    }
-                    fcntl(client_fd, F_SETFL, O_NONBLOCK);
-
-                    auto ctx = std::make_unique<SocketCtx>();
-                    ctx->fd = client_fd;
-                    ctx->handler = [client_fd, client_addr, &loop, &pool](uint32_t e)
-                    {
-                        [[maybe_unused]] uint32_t unused_ev = e;
-                        handle_rtsp_request(client_fd, client_addr, &loop, pool);
-                    };
-                    loop.set(std::move(ctx), client_fd, EPOLLIN);
-                }
-            });
-
-        loop.set(rtsp_listen_ctx.get(), rtsp_listen_fd, EPOLLIN);
-        Logger::info("[SERVER] RTSP MITM proxy listening on port " +
-                     std::to_string(rtsp_listen_port));
-    }
+    Logger::info("[SERVER] Unified HTTP/RTSP server listening on port " + std::to_string(listen_port));
 
     loop.loop();
 
