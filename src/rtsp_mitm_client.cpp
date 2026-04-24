@@ -301,8 +301,13 @@ bool RTSPMitmClient::init_relay_sockets()
 std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
 {
     std::string result = resp;
-    std::string proxy_ip = "10.1.0.6"; // Should ideally be dynamic from ServerConfig or socket
-    uint16_t proxy_port = 8555;      // Should ideally be dynamic
+
+    // Dynamically get local IP/port that the client connected to
+    struct sockaddr_in local_addr{};
+    socklen_t addr_len = sizeof(local_addr);
+    getsockname(downstream_fd_, (struct sockaddr *)&local_addr, &addr_len);
+    std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
+    uint16_t proxy_port = ntohs(local_addr.sin_port);
 
     // 1. Rewrite Transport header (if present)
     std::string transport = extract_header_value(result, "Transport");
@@ -324,9 +329,7 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
             server_rtcp_addr_.sin_port = htons(srv_rtcp);
             inet_pton(AF_INET, ctx_.server_ip.c_str(), &server_rtcp_addr_.sin_addr);
             
-            // Send a trigger packet to upstream now that we know its port.
-            char dummy = 0;
-            sendto(rtp_us_fd_, &dummy, 1, 0, (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+            send_rtp_trigger();
         }
 
         // Rewrite client_port back to original client ports.
@@ -343,14 +346,13 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
             "server_port=" + std::to_string(local_rtp_port_) + "-" +
                 std::to_string(local_rtcp_port_));
 
-        // Rewrite source=<upstream-ip> to proxy-ip
+        // Rewrite source to our proxy IP
         std::regex src_re(R"(source=[0-9.]+)");
         transport = std::regex_replace(transport, src_re, "source=" + proxy_ip);
 
         Logger::debug("[MITM] Patched Transport: " + transport);
         result = replace_header(result, "Transport", transport);
     }
-
     // 2. Rewrite Content-Base and RTP-Info (URIs pointing to upstream)
     // We need to be flexible with ports because the server might use 9820 or other ports.
     // Regex matches rtsp://<upstream-ip>:<any-port>/
@@ -848,6 +850,7 @@ void RTSPMitmClient::on_upstream_readable()
                              " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) +
                              ":" + std::to_string(ntohs(client_addr_.sin_port)));
                 init_timer_fd();
+                send_rtp_trigger();
             }
         }
 
@@ -915,3 +918,16 @@ RTSPMitmClient::FdGuard &RTSPMitmClient::FdGuard::operator=(FdGuard &&other) noe
 int &RTSPMitmClient::FdGuard::get_ref() { return fd_; }
 int RTSPMitmClient::FdGuard::get() const { return fd_; }
 RTSPMitmClient::FdGuard::operator int() const { return fd_; }
+void RTSPMitmClient::send_rtp_trigger()
+{
+    if (server_rtp_addr_.sin_port == 0) return;
+    
+    char dummy = 0;
+    // Trigger RTP
+    sendto(rtp_us_fd_, &dummy, 1, 0, (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+    // Trigger RTCP
+    if (server_rtcp_addr_.sin_port != 0) {
+        sendto(rtcp_us_fd_, &dummy, 1, 0, (struct sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
+    }
+    Logger::debug("[MITM] Sent RTP/RTCP trigger packets to upstream");
+}

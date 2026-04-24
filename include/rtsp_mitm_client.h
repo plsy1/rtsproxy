@@ -119,6 +119,7 @@ private:
     void on_downstream_closed();
     void on_upstream_readable();
     void on_upstream_writable();
+    void send_rtp_trigger();
 
     void close_all();
 
