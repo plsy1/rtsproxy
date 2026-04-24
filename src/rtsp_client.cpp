@@ -32,7 +32,8 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
 
     if (rtspParser::parse_url(rtsp_url, ctx) != 0)
     {
-        on_closed_callback_();
+        if (on_closed_callback_) on_closed_callback_();
+        return;
     }
 
     loop->set(client_ctx_.get(), client_fd, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
@@ -71,7 +72,8 @@ void RTSPClient::connect_server()
     if (rtsp_fd_ < 0)
     {
         Logger::error("[RTSP] Connect to upstream failed.");
-        on_closed_callback_();
+        if (on_closed_callback_) on_closed_callback_();
+        return;
     }
 
     rtsp_ctx_ = std::make_unique<SocketCtx>(
@@ -162,7 +164,6 @@ void RTSPClient::on_rtsp_writable()
         }
         Logger::info("[RTSP] Connection to upstream established.");
         state_ = RtspState::CONNECTED;
-        return;
     }
 
     ssize_t n = send(rtsp_fd_, req_buf_.data() + tcp_send_offset_,
@@ -201,6 +202,7 @@ void RTSPClient::on_rtsp_readable()
                 {
                     Logger::error("[RTSP] Connection to upstream refused. Please verify if the URL is correct.");
                     on_closed_callback_();
+                    return;
                 }
 
                 if (current_request_.method == RtspMethod::OPTIONS)
@@ -220,6 +222,7 @@ void RTSPClient::on_rtsp_readable()
                     {
                         Logger::error("Can't parser server port");
                         on_closed_callback_();
+                        return;
                     }
 
                     Logger::info(std::string("[RTSP] SETUP done, ready to PLAY, server port: " + std::to_string(ctx.server_rtp_port) + "-" + std::to_string(ctx.server_rtcp_port)));
@@ -367,7 +370,8 @@ void RTSPClient::build_and_send_request()
         req_buf_.clear();
         req_buf_ += RtspMethodToString(current_request_.method) + " " + current_request_.uri + " RTSP/1.0\r\n";
         req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
-        req_buf_ += "Session: " + ctx.session_id + "\r\n";
+        if (!ctx.session_id.empty())
+            req_buf_ += "Session: " + ctx.session_id + "\r\n";
         req_buf_ += current_request_.headers;
         if (!current_request_.body.empty())
             req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;
@@ -384,13 +388,15 @@ void RTSPClient::init_rtp_rtcp_sockets()
     if (bind_udp_socket_with_retry(rtp_fd_.get_ref(), rtp_port_, 3, ServerConfig::getInterface()) < 0)
     {
         Logger::error("[RTP] Failed to bind RTP socket after multiple attempts");
-        on_closed_callback_();
+        if (on_closed_callback_) on_closed_callback_();
+        return;
     }
 
     if (bind_udp_socket(rtcp_fd_.get_ref(), rtp_port_ + 1, ServerConfig::getInterface()) < 0)
     {
         Logger::error("[RTP] Failed to bind RTCP socket");
-        on_closed_callback_();
+        if (on_closed_callback_) on_closed_callback_();
+        return;
     }
 
     rtp_ctx_ = std::make_unique<SocketCtx>(
@@ -487,6 +493,11 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
 
         uint16_t ext_len = ntohs(*reinterpret_cast<uint16_t *>(buf + payloadstart + 2));
         payloadstart += 4 + 4 * ext_len;
+        if (payloadstart > recv_len)
+        {
+            Logger::warn("[RTP] Malformed RTP packet: extension overruns packet");
+            return false;
+        }
     }
 
     // Calculate payload length
@@ -498,7 +509,7 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
         payload_len -= buf[recv_len - 1];
     }
 
-    if (payload_len <= 0 || payloadstart + payload_len > recv_len)
+    if (payload_len == 0 || payloadstart + payload_len > recv_len)
     {
         Logger::warn("[RTP] Malformed RTP packet: invalid payload length");
         return false;
@@ -567,6 +578,7 @@ void RTSPClient::send_rtsp_setup()
     {
         Logger::error("[RTSP] Unsupported video format, no track with format 33 found!");
         on_closed_callback_();
+        return;
     }
 
     int port1 = nat_wan_port ? nat_wan_port : rtp_port_;

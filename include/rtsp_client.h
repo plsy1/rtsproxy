@@ -149,7 +149,7 @@ private:
     std::string nat_wan_ip;
     std::string req_buf_;
     std::string resp_buf_;
-    char rtsp_buf[2048];
+    char rtsp_buf[8192];
 
     rtspCtx ctx;
 

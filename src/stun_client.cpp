@@ -49,6 +49,8 @@ int StunClient::send_stun_mapping_request(int s)
     }
 
     struct sockaddr_in stun_addr = *(struct sockaddr_in *)res->ai_addr;
+    freeaddrinfo(res);  // must free after copying the address
+
     unsigned char tid[12];
     gen_tid(tid);
 

@@ -51,9 +51,9 @@ void EpollLoop::set_non_blocking(int fd)
 
 void EpollLoop::remove(int fd)
 {
-    if (epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr) < 0)
+    if (epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr) < 0 && errno != ENOENT)
     {
-        Logger::error("epoll_ctl EPOLL_CTL_DEL failed");
+        Logger::error("epoll_ctl EPOLL_CTL_DEL failed: " + std::string(strerror(errno)));
     }
 
     ctx_ptr_map.erase(fd);

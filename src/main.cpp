@@ -34,7 +34,8 @@ int main(int argc, char *argv[])
             {nullptr, 0, nullptr, 0}};
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kd", long_options, nullptr)) != -1)
+    int longindex = -1;
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kd", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -71,11 +72,11 @@ int main(int argc, char *argv[])
             Logger::info("[SERVER] Running in daemon mode");
             break;
         case 0:
-            if (strcmp(long_options[opt].name, "set-stun-port") == 0)
+            if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
             {
                 ServerConfig::setStunPort(std::atoi(optarg));
             }
-            else if (strcmp(long_options[opt].name, "set-stun-host") == 0)
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-host") == 0)
             {
                 ServerConfig::setStunHost(optarg);
             }
