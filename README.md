@@ -1,41 +1,44 @@
 # rtsproxy
 
-一款具有 NAT 穿越功能的 RTSP 代理工具，支持两种工作模式：
-
-- **HTTP 模式**：客户端通过 HTTP 请求访问代理（默认 8554 端口），代理将 RTP 流以 HTTP 响应的形式返回。
-- **RTSP MITM 模式**：客户端通过 RTSP 连接代理（与 HTTP 共用 8554 端口），代理透明地转发 RTSP 信令和 RTP/RTCP 数据包。
-
-## 使用说明
-
-### nat 环境下接收 rtp over udp 数据
-
-启动时附加参数 `--enable-nat` 开启，原理是向 STUN 服务器发送请求，获取 NAT 映射 WAN 侧的端口，将这个端口写在 RTSP 协议的 SETUP 命令里面。
+一款高性能、多模式的 RTSP 媒体代理工具。支持统一端口（8554）分发 HTTP 和 RTSP 流量，具备 URL 重写、时间偏移（Timeshift）以及 NAT 穿越功能。
 
 ---
 
-## HTTP 模式
+## 核心特性
 
-### /rtp
+- **统一端口**：HTTP 代理与 RTSP MITM 代理共用 8554 端口，自动识别协议。
+- **高性能转发**：RTSP 模式下采用 64KB 缓冲区排水技术，有效防止高码率下的报文截断和丢包。
+- **URL 重写**：支持通过正则规则重写上游地址，支持 `/rtp` 和 `/tv` 路径。
+- **多模式支持**：
+    1. **HTTP 代理模式** (支持 STUN 打洞)
+    2. **RTSP MITM 模式** (高性能透明中继)
 
-标准 RTSP 代理，将上游 RTSP 流通过 HTTP 透传给客户端（裸 TS 流）。
+---
 
-**示例：**
+## 工作模式详解
 
-| 项目 | 地址 |
-|---|---|
-| rtsproxy 地址 | `http://192.168.0.3:8554` |
-| 目标 RTSP 地址 | `rtsp://a.b.c.d:554` |
-| 访问地址 | `http://192.168.0.3:8554/rtp/a.b.c.d:554` |
+### 1. HTTP 代理模式 (推荐用于 NAT 环境)
+客户端通过 HTTP 协议请求代理，代理将上游 RTSP 流转换为裸 TS 流通过 HTTP 返回。
 
-### /tv
+- **STUN 支持**：**支持**。通过 `--enable-nat` 开启，适用于代理服务器位于 NAT 后的环境。
+- **访问格式**：
+    - `http://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
+    - `http://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持规则重写)
 
-用于将回放地址与直播地址的 URI 统一，以便在某些不支持 m3u catchup 参数的播放器看回放。
+### 2. RTSP MITM 模式 (推荐用于内网透明中继)
+客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
-使用正则将客户端发来的地址替换为正确的回看地址，再去请求上游。
+- **STUN 支持**：**不支持**。适用于代理服务器拥有公网 IP 或与上游服务器在同一内网的环境。
+- **技术优势**：专为高码率 IPTV 优化，具备 64KB UDP 缓冲区和 `while(true)` 排水逻辑，彻底解决 `Packet corrupt` 问题。
+- **访问格式**：
+    - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
+    - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
 
-需要手动配置 JSON 文件替换规则，例如：
+---
 
-将 `rtsp://a.b.c.d:554/iptv/import/Tvod/iptv/001/001/channelName.rsc/abcde_Uni.sdp?tvdr=yyyyMMddHHmmss-yyyyMMddHHmmss` 替换为 `rtsp://a.b.c.d:554/iptv/Tvod/iptv/001/001/channelName.rsc?tvdr=yyyyMMddHHmmssGMT-yyyyMMddHHmmssGMT`，配置如下：
+## 配置说明 (config.json)
+
+用于 `/tv` 路径下的 URL 自动转换。支持 `remove`、`replace` 和 `timeshift`（时间偏移）。
 
 ```json
 {
@@ -67,70 +70,30 @@
 }
 ```
 
-action 支持 remove、replace、timeshift，应该能覆盖各种场景（?）
-
-match 可以写 `{number}` `{word}` `{any}`，避免手动写正则
-
----
-
-## RTSP MITM 模式
-
-RTSP MITM（中间人）模式现在与 HTTP 模式共用端口（默认 **8554**）。程序会自动根据请求头识别协议。
-
-**工作原理：**
-
-```
-客户端 ──── rtsp://proxy:8554/rtp/real-host:port/path ───► rtsproxy
-                               │
-               从 URL 路径中提取真实服务器地址
-               支持 /rtp (直接代理) 和 /tv (规则重写)
-               改写 Transport 头（中继 RTP 端口）
-                               │
-                               ▼
-                         真实 RTSP 服务器
-                               │
-                         RTP/RTCP UDP 数据 (64KB 缓冲区)
-                         双向中继转发给客户端
-```
-
-**URL 格式：**
-
-- **标准模式 (RTP)**: `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
-- **电视模式 (TV)**: `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持 `config.json` 规则)
-- **兼容模式**: `rtsp://<proxy-ip>:8554/<real-host>:<real-port>/<path>`
-
-**示例：**
-
-| 项目 | 值 |
-|---|---|
-| 程序运行地址 | `10.1.0.6:8554` |
-| 目标 RTSP 地址 | `rtsp://112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch1212.sdp` |
-| 访问代理地址 | `rtsp://10.1.0.6:8554/rtp/112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch1212.sdp` |
-
-启动命令：
-
-```bash
-# 默认开启 8554，自动分发 HTTP 和 RTSP
-./rtsproxy
-```
-
 ---
 
 ## 命令行参数
 
-```
+```bash
 Options:
-  -p, --port            <port>  Set HTTP server port (default: 8554)
-  -n, --enable-nat              Enable NAT (default: disabled)
-  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: 8192)
-  -u, --udp-packet-size <size>  Set UDP packet size (default: 1500)
-  -t, --set-auth-token  <token> Set auth token (default: no auth required)
-  -i, --set-interface   <iface> Set upstream network interface
-  -j, --set-json-path   <path>  Set JSON file path (default: config.json)
-  -d, --daemon                  Run rtsproxy in the background
-  -k, --kill                    Kill the running rtsproxy instance
-      --set-stun-host   <host>  Set STUN server host (default: stun.l.google.com)
-      --set-stun-port   <port>  Set STUN server port (default: 19302)
+  -p, --port            <port>  设置代理主端口 (默认: 8554)
+  -n, --enable-nat              开启 NAT 穿越 (仅 HTTP 模式有效)
+  -r, --rtp-buffer-size <size>  设置 RTP 缓冲区包数量 (默认: 8192)
+  -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 1500)
+  -i, --set-interface   <iface> 设置上游出接口
+  -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
+  -d, --daemon                  后台运行
+  -k, --kill                    杀死正在运行的实例
 ```
 
+---
 
+## 编译与运行
+
+```bash
+# 编译
+cd build && ninja
+
+# 运行
+./rtsproxy
+```
