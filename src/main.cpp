@@ -30,7 +30,6 @@ int main(int argc, char *argv[])
             {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
-            {"rtsp-port", required_argument, nullptr, 0},
             {"kill", no_argument, nullptr, 'k'},
             {"daemon", no_argument, nullptr, 'd'},
             {nullptr, 0, nullptr, 0}};
@@ -81,10 +80,6 @@ int main(int argc, char *argv[])
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-host") == 0)
             {
                 ServerConfig::setStunHost(optarg);
-            }
-            else if (longindex >= 0 && strcmp(long_options[longindex].name, "rtsp-port") == 0)
-            {
-                ServerConfig::setRtspPort(std::atoi(optarg));
             }
             break;
         default:

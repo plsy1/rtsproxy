@@ -190,6 +190,6 @@ private:
     std::string proxy_uri_prefix_;   // e.g. "rtsp://10.1.0.6:8555/112.245.125.44:1554"
     std::string upstream_uri_base_;  // e.g. "rtsp://112.245.125.44:1554"
 
-    // Removed rtp_buf_ in favor of BufferPool for consistency with RTSPClient
+    // High-speed relay buffer (64KB) to prevent truncation and allow immediate forwarding
     uint8_t rtp_relay_buf_[65536];
 };

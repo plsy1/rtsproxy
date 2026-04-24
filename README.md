@@ -121,9 +121,8 @@ RTSP MITM（中间人）模式现在与 HTTP 模式共用端口（默认 **8554*
 ```
 Options:
   -p, --port            <port>  Set HTTP server port (default: 8554)
-      --rtsp-port        <port>  Enable RTSP MITM proxy on this port (e.g. 554)
   -n, --enable-nat              Enable NAT (default: disabled)
-  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: 4096)
+  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: 8192)
   -u, --udp-packet-size <size>  Set UDP packet size (default: 1500)
   -t, --set-auth-token  <token> Set auth token (default: no auth required)
   -i, --set-interface   <iface> Set upstream network interface

@@ -514,7 +514,6 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        // Use full 64KB capacity to avoid truncation (crucial for some streams)
         ssize_t n = recvfrom(rtp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
                              (sockaddr *)&src, &slen);
         if (n <= 0)
