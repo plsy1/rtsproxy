@@ -1,4 +1,5 @@
 #include "../include/rtsp_mitm_client.h"
+#include "../include/http_parser.h"
 #include "../include/epoll_loop.h"
 #include "../include/logger.h"
 #include "../include/server_config.h"
@@ -118,8 +119,30 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
     // "host:port" (contains a colon and only valid hostname/IP chars).
     // ---------------------------------------------------------------
     {
-        std::string path = ctx_.path; // e.g. "/112.245.125.44:1554/iptv/..."
-        if (path.size() > 1)
+        std::string path = ctx_.path;
+        std::string rewritten_rtsp_url;
+        bool is_prefixed = false;
+
+        if (path.find("/rtp/") == 0 || path.find("/tv/") == 0) {
+            if (httpParser::parse_http_url(path, rewritten_rtsp_url)) {
+                is_prefixed = true;
+            }
+        }
+
+        if (is_prefixed)
+        {
+            rtspCtx real_ctx;
+            if (rtspParser::parse_url(rewritten_rtsp_url, real_ctx) == 0) {
+                size_t path_pos = uri.find(real_ctx.path);
+                if (path_pos != std::string::npos) {
+                    proxy_uri_prefix_ = uri.substr(0, path_pos);
+                    upstream_uri_base_ = "rtsp://" + real_ctx.server_ip + ":" + std::to_string(real_ctx.server_rtsp_port);
+                    ctx_ = real_ctx;
+                    Logger::info("[MITM] Prefixed URL detected. Upstream: " + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port) + ctx_.path);
+                }
+            }
+        }
+        else if (path.size() > 1)
         {
             std::string stripped = path.substr(1); // remove leading '/'
             size_t slash = stripped.find('/');

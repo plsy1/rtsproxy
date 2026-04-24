@@ -2,8 +2,8 @@
 
 一款具有 NAT 穿越功能的 RTSP 代理工具，支持两种工作模式：
 
-- **HTTP 模式**：客户端通过 HTTP 请求访问代理，代理将 RTP 流以 HTTP 响应的形式返回。
-- **RTSP MITM 模式**：客户端直接使用 `rtsp://` 连接代理，代理透明地转发 RTSP 信令和 RTP/RTCP 数据包，对客户端完全透明。
+- **HTTP 模式**：客户端通过 HTTP 请求访问代理（默认 8554 端口），代理将 RTP 流以 HTTP 响应的形式返回。
+- **RTSP MITM 模式**：客户端通过 RTSP 连接代理（与 HTTP 共用 8554 端口），代理透明地转发 RTSP 信令和 RTP/RTCP 数据包。
 
 ## 使用说明
 
@@ -75,44 +75,44 @@ match 可以写 `{number}` `{word}` `{any}`，避免手动写正则
 
 ## RTSP MITM 模式
 
-通过 `--rtsp-port` 参数启用，代理监听一个标准 RTSP 端口，客户端像连接真实 RTSP 服务器一样直接连接代理，代理透明转发所有 RTSP 信令并中继 RTP/RTCP UDP 数据包。
+RTSP MITM（中间人）模式现在与 HTTP 模式共用端口（默认 **8554**）。程序会自动根据请求头识别协议。
 
 **工作原理：**
 
 ```
-客户端 ──── rtsp://proxy:port/real-host:port/path ────► rtsproxy
+客户端 ──── rtsp://proxy:8554/rtp/real-host:port/path ───► rtsproxy
                                │
                从 URL 路径中提取真实服务器地址
+               支持 /rtp (直接代理) 和 /tv (规则重写)
                改写 Transport 头（中继 RTP 端口）
                                │
                                ▼
                          真实 RTSP 服务器
                                │
-                         RTP/RTCP UDP 数据
+                         RTP/RTCP UDP 数据 (64KB 缓冲区)
                          双向中继转发给客户端
 ```
 
 **URL 格式：**
 
-```
-rtsp://<proxy-ip>:<rtsp-port>/<real-host>:<real-port>/<path>
-```
+- **标准模式 (RTP)**: `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
+- **电视模式 (TV)**: `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持 `config.json` 规则)
+- **兼容模式**: `rtsp://<proxy-ip>:8554/<real-host>:<real-port>/<path>`
 
 **示例：**
 
 | 项目 | 值 |
 |---|---|
-| 程序运行地址 | `10.1.0.6`，RTSP MITM 端口 `8555` |
-| 目标 RTSP 地址 | `rtsp://112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch12122514263996485740.rsc/69958_Uni.sdp` |
-| 访问代理地址 | `rtsp://10.1.0.6:8555/112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch12122514263996485740.rsc/69958_Uni.sdp` |
+| 程序运行地址 | `10.1.0.6:8554` |
+| 目标 RTSP 地址 | `rtsp://112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch1212.sdp` |
+| 访问代理地址 | `rtsp://10.1.0.6:8554/rtp/112.245.125.44:1554/iptv/import/Tvod/iptv/001/001/ch1212.sdp` |
 
 启动命令：
 
 ```bash
-./rtsproxy --rtsp-port 8555
+# 默认开启 8554，自动分发 HTTP 和 RTSP
+./rtsproxy
 ```
-
-> 注意：监听 554 端口通常需要 root 权限或 `CAP_NET_BIND_SERVICE` 能力。可使用任意非特权端口（如 `--rtsp-port 8555`）代替。
 
 ---
 
