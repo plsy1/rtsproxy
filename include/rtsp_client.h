@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../include/common/rtsp_ctx.h"
+#include "../include/iclient.h"
 #include <string>
 #include <queue>
 #include <vector>
@@ -15,15 +16,13 @@ class BufferPool;
 class SocketCtx;
 class Packet;
 
-class RTSPClient
+class RTSPClient : public IClient
 {
 public:
     explicit RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const std::string &rtsp_url);
-    ~RTSPClient();
+    ~RTSPClient() override;
 
-    using ClosedCallback = std::function<void()>;
-
-    void set_on_closed_callback(ClosedCallback cb);
+    void set_on_closed_callback(ClosedCallback cb) override;
 
 private:
     enum class RtspState

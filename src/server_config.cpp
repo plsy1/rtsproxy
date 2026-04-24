@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 int ServerConfig::port = 8554;
+int ServerConfig::rtsp_port = 0; // 0 = disabled by default
 bool ServerConfig::enable_nat = false;
 int ServerConfig::rtp_buffer_size = 4096;
 int ServerConfig::udp_packet_size = 1500;
@@ -19,6 +20,11 @@ std::string ServerConfig::upstream_interface = "";
 void ServerConfig::setPort(int p)
 {
     port = p;
+}
+
+void ServerConfig::setRtspPort(int p)
+{
+    rtsp_port = p;
 }
 
 void ServerConfig::enableNat()
@@ -67,6 +73,11 @@ int ServerConfig::getPort()
     return port;
 }
 
+int ServerConfig::getRtspPort()
+{
+    return rtsp_port;
+}
+
 bool ServerConfig::isNatEnabled()
 {
     return enable_nat;
@@ -111,7 +122,8 @@ void ServerConfig::printUsage(const std::string &program_name)
 {
     std::cout << "Usage: " << program_name << " [options]" << std::endl;
     std::cout << "Options:" << std::endl;
-    std::cout << "  -p, --port            <port>  Set server port (default: " << port << ")" << std::endl;
+    std::cout << "  -p, --port            <port>  Set HTTP server port (default: " << port << ")" << std::endl;
+    std::cout << "      --rtsp-port        <port>  Enable RTSP MITM proxy on this port (e.g. 554)" << std::endl;
     std::cout << "  -n, --enable-nat              Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
     std::cout << "  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;

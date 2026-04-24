@@ -2,6 +2,7 @@
 #include "../include/logger.h"
 #include "../include/epoll_loop.h"
 #include "../include/rtsp_client.h"
+#include "../include/iclient.h"
 #include "../include/buffer_pool.h"
 #include "../include/http_parser.h"
 #include "../include/server_config.h"
@@ -134,7 +135,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     Logger::info("[SERVER] New http client request: " + client_host + " -> " + rtsp_url);
 
-    auto client = std::make_unique<RTSPClient>(loop, pool, client_addr, client_fd, rtsp_url);
+    std::unique_ptr<IClient> client = std::make_unique<RTSPClient>(loop, pool, client_addr, client_fd, rtsp_url);
 
     loop->add_client_to_map(client_fd, std::move(client));
 

@@ -1,4 +1,4 @@
-#include "../include/rtsp_client.h"
+#include "../include/iclient.h"
 #include "../include/epoll_loop.h"
 #include "../include/common/socket_ctx.h"
 #include "../include/logger.h"
@@ -129,7 +129,7 @@ void EpollLoop::loop(int timeout_ms)
     }
 }
 
-RTSPClient *EpollLoop::get_client_from_map(int client_fd)
+IClient *EpollLoop::get_client_from_map(int client_fd)
 {
     auto it = client_ptr_map.find(client_fd);
     if (it != client_ptr_map.end())
@@ -139,7 +139,7 @@ RTSPClient *EpollLoop::get_client_from_map(int client_fd)
     return nullptr;
 }
 
-void EpollLoop::add_client_to_map(int client_fd, std::unique_ptr<RTSPClient> client)
+void EpollLoop::add_client_to_map(int client_fd, std::unique_ptr<IClient> client)
 {
     auto it = client_ptr_map.find(client_fd);
     if (it != client_ptr_map.end())

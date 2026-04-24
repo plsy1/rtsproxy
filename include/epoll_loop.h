@@ -8,7 +8,7 @@
 #include <memory>
 #include <functional>
 
-class RTSPClient;
+class IClient;
 class SocketCtx;
 
 class EpollLoop
@@ -25,9 +25,9 @@ public:
 
     static void set_non_blocking(int fd);
 
-    RTSPClient *get_client_from_map(int client_fd);
+    IClient *get_client_from_map(int client_fd);
 
-    void add_client_to_map(int client_fd, std::unique_ptr<RTSPClient> client);
+    void add_client_to_map(int client_fd, std::unique_ptr<IClient> client);
 
     void remove_client_from_map(int client_fd);
 
@@ -36,7 +36,7 @@ private:
     int max_events_;
     std::vector<struct epoll_event> events_;
     std::unordered_map<int, std::unique_ptr<SocketCtx>> ctx_ptr_map;
-    std::unordered_map<int, std::unique_ptr<RTSPClient>> client_ptr_map;
+    std::unordered_map<int, std::unique_ptr<IClient>> client_ptr_map;
 
     // Queue to hold tasks
     std::queue<std::function<void()>> task_queue_;

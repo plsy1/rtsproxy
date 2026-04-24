@@ -6,6 +6,7 @@ class ServerConfig
 {
 public:
     static void setPort(int p);
+    static void setRtspPort(int p);
     static void enableNat();
     static void setRtpBufferSize(int size);
     static void setUdpPacketSize(int size);
@@ -17,6 +18,7 @@ public:
 
     static bool isNatEnabled();
     static int getPort();
+    static int getRtspPort();
     static int getRtpBufferSize();
     static int getUdpPacketSize();
     static int getStunPort();
@@ -30,6 +32,7 @@ public:
 
 private:
     static int port;
+    static int rtsp_port;
     static bool enable_nat;
     static int rtp_buffer_size;
     static int udp_packet_size;
