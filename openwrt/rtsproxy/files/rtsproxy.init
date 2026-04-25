@@ -1,4 +1,4 @@
-#!/etc/init.d/rc.common
+#!/etc/rc.common
 
 START=99
 USE_PROCD=1
@@ -50,10 +50,11 @@ start_service() {
 }
 
 stop_service() {
-	# Procd handles stopping automatically
 	return 0
 }
 
 service_triggers() {
 	procd_add_reload_trigger "$CONF"
 }
+
+# End of script

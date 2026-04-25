@@ -43,3 +43,5 @@
 musl-crossfile-x86_64.ini
 .vscode
 bin
+
+openwrt-sdk-x86_64
