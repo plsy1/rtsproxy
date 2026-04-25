@@ -72,9 +72,9 @@ find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {
 # 4. 执行编译
 echo "[4/4] 开始交叉编译..."
 # 强制选中我们的包
+echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-rtsproxy=y" >> .config
 make defconfig > /dev/null
-sed -i 's/CONFIG_PACKAGE_rtsproxy=m/CONFIG_PACKAGE_rtsproxy=y/' .config
-sed -i 's/CONFIG_PACKAGE_luci-app-rtsproxy=m/CONFIG_PACKAGE_luci-app-rtsproxy=y/' .config
 
 # 编译，使用多核加速
 make package/rtsproxy/compile V=s -j$(nproc)

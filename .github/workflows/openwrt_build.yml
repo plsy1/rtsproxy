@@ -22,9 +22,9 @@ jobs:
           - arch: 23.05-aarch64
             sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/rockchip/armv8/openwrt-sdk-23.05.5-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
           - arch: 24.10-x64
-            sdk_url: https://downloads.openwrt.org/releases/24.10.0/targets/x86/64/openwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            sdk_url: https://downloads.openwrt.org/releases/24.10.4/targets/x86/64/openwrt-sdk-24.10.4-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
           - arch: 24.10-aarch64
-            sdk_url: https://downloads.openwrt.org/releases/24.10.0/targets/rockchip/armv8/openwrt-sdk-24.10.0-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            sdk_url: https://downloads.openwrt.org/releases/24.10.4/targets/rockchip/armv8/openwrt-sdk-24.10.4-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -84,9 +84,9 @@ jobs:
           fi
 
           # Configure the packages
+          echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-rtsproxy=y" >> .config
           make defconfig
-          sed -i 's/CONFIG_PACKAGE_rtsproxy=m/CONFIG_PACKAGE_rtsproxy=y/' .config
-          sed -i 's/CONFIG_PACKAGE_luci-app-rtsproxy=m/CONFIG_PACKAGE_luci-app-rtsproxy=y/' .config
 
           # Compile
           make package/rtsproxy/compile V=s
@@ -97,13 +97,13 @@ jobs:
           # 提取 Makefile 里的版本号
           VERSION=$(grep "^PKG_VERSION:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
           mkdir -p output
-          for file in $(find sdk/bin/packages/ -name "rtsproxy*.ipk" ! -name "luci-app-rtsproxy*"); do
+          for file in $(find sdk/bin/packages/ -name "rtsproxy*.ipk" ! -name "luci-app-rtsproxy*" ! -name "*-dbgsym*"); do
             # 统一命名格式: rtsproxy_版本-r1_openwrt-系统-架构.ipk
             new_filename="rtsproxy_${VERSION}-r1_openwrt-${{ matrix.arch }}.ipk"
             cp "$file" "output/$new_filename"
           done
-          # LuCI 界面全架构通用，重命名为 -r1 规范
-          for file in $(find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk"); do
+          # LuCI 界面全架构通用，重命名为 -r1 规范，排除调试包
+          for file in $(find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" ! -name "*-dbgsym*"); do
             new_filename="luci-app-rtsproxy_${VERSION}-r1_all.ipk"
             cp "$file" "output/$new_filename"
           done
