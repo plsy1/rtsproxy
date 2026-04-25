@@ -11,6 +11,9 @@
 - **多模式支持**：
     1. **HTTP 代理模式** (支持 STUN 打洞)
     2. **RTSP MITM 模式** (高性能透明中继)
+- **协议自适应**：
+    - **下游自适应**：根据客户端 SETUP 请求自动选择 UDP 或 TCP (Interleaved) 回传。
+    - **上游故障回退**：向上游拉流优先尝试 UDP，若失败（如 461 错误）自动无感回退至 TCP。
 
 ---
 
@@ -32,6 +35,23 @@
 - **访问格式**：
     - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
+
+---
+
+## 协议传输机制
+
+本项目在传输层具备极强的健壮性，能够自动处理复杂的网络环境。
+
+### 1. 下游回传 (Proxy -> Client)
+代理会根据客户端 `SETUP` 请求中的 `Transport` 报头自动决策：
+- 如果客户端请求 `RTP/AVP`（如 `ffplay -rtsp_transport udp`），代理通过 **UDP** 回传数据。
+- 如果客户端请求 `RTP/AVP/TCP`（如 `ffplay -rtsp_transport tcp`），代理通过 **TCP 交织 (Interleaved)** 模式回传数据。
+
+### 2. 上游拉流 (Proxy -> Upstream Server)
+代理对上游的连接采取“**优先 UDP，故障回退**”策略：
+- **第一阶段**：代理首先尝试以 **UDP** 模式向上游发起 `SETUP`。
+- **第二阶段 (自动回退)**：如果上游服务器返回 `461 Unsupported Transport`（不支持 UDP），代理会**自动拦截**该错误并立即改用 **TCP 交织** 模式重新发起请求。
+- **透明性**：整个回退过程对客户端完全透明，确保在任何网络环境下都能成功拉流。
 
 ---
 
