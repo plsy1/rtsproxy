@@ -36,6 +36,8 @@ define Package/rtsproxy/install
 	$(INSTALL_BIN) files/rtsproxy.init $(1)/etc/init.d/rtsproxy
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) files/rtsproxy.config $(1)/etc/config/rtsproxy
+	$(INSTALL_DIR) $(1)/etc/rtsproxy
+	$(INSTALL_CONF) files/config.json $(1)/etc/rtsproxy/config.json
 endef
 
 $(eval $(call BuildPackage,rtsproxy))

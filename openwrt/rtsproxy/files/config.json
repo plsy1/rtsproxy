@@ -1,0 +1,15 @@
+{
+  "replace_templates": [
+    {
+      "action": "remove",
+      "match": "/{number}_Uni.sdp",
+      "description": "删除文件名"
+    },
+    {
+      "action": "replace",
+      "match": "/iptv/import",
+      "replacement": "/iptv",
+      "description": "替换 /iptv/import 为 /iptv"
+    }
+  ]
+}
