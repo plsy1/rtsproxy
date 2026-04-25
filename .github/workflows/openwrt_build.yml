@@ -56,8 +56,9 @@ jobs:
       - name: Build Packages
         run: |
           cd sdk
-          # Fix paths for the Makefile (which expects to be in package/rtsproxy)
-          rm -rf package/rtsproxy
+          rm -rf package/rtsproxy package/luci-app-rtsproxy
+          
+          # 准备本体
           mkdir -p package/rtsproxy
           cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
           cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
@@ -66,32 +67,42 @@ jobs:
           cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
           cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
           
-          # Force fix CRLF to LF just like build_openwrt.sh
-          find package/rtsproxy -type f -exec sed -i 's/\r$//' {} +
+          # 准备 LuCI
+          mkdir -p package/luci-app-rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
 
-          # Sync version with GitHub Release tag
+          # 修复换行符
+          find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
+
+          # 同步版本号
           if [ "${{ github.event_name }}" = "release" ]; then
             VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}" # Remove 'v' prefix (e.g., v0.1.13 -> 0.1.13)
+            VERSION="${VERSION#v}"
             sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/rtsproxy/Makefile
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/luci-app-rtsproxy/Makefile
           fi
 
-          # Configure the packages
+          # 配置并编译
           echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-rtsproxy=y" >> .config
           make defconfig
 
-          # Compile
           make package/rtsproxy/compile V=s
+          make package/luci-app-rtsproxy/compile V=s
 
       - name: Collect artifacts
         run: |
-          # 提取 Makefile 里的版本号
           VERSION=$(grep "^PKG_VERSION:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
           mkdir -p output
+          # 收集本体 (排除调试包)
           for file in $(find sdk/bin/packages/ -name "rtsproxy*.ipk" ! -name "luci-app-rtsproxy*" ! -name "*-dbgsym*"); do
-            # 统一命名格式: rtsproxy_版本-r1_openwrt-系统-架构.ipk
-            new_filename="rtsproxy_${VERSION}-r1_openwrt-${{ matrix.arch }}.ipk"
-            cp "$file" "output/$new_filename"
+            cp "$file" "output/rtsproxy_${VERSION}-r1_openwrt-${{ matrix.arch }}.ipk"
+          done
+          # 收集 LuCI (排除调试包)
+          for file in $(find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" ! -name "*-dbgsym*"); do
+            cp "$file" "output/luci-app-rtsproxy_${VERSION}-r1_all.ipk"
           done
 
       - name: Upload artifacts
@@ -108,8 +119,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -120,7 +129,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for i in release_ipk/*.ipk; do
-            [ -f "$i" ] || continue
-            gh release upload ${{ github.event.release.tag_name }} "$i"
-          done
+          gh release upload ${{ github.event.release.tag_name }} release_ipk/*.ipk
