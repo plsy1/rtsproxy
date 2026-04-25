@@ -1,0 +1,67 @@
+name: Test AARCH64 Build
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: Build for 24.10-aarch64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils zstd python3-pyelftools
+
+      - name: Download and setup SDK
+        run: |
+          mkdir sdk
+          wget -q https://downloads.openwrt.org/releases/24.10.0/targets/rockchip/armv8/openwrt-sdk-24.10.0-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          tar xf openwrt-sdk-*.tar.* -C sdk --strip-components=1
+          rm openwrt-sdk-*.tar.*
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Build Packages
+        run: |
+          cd sdk
+          mkdir -p package/rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/src package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/include package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
+          
+          mkdir -p package/luci-app-rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/ 2>/dev/null || true
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
+
+          find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
+
+          make defconfig
+          sed -i 's/CONFIG_PACKAGE_rtsproxy=m/CONFIG_PACKAGE_rtsproxy=y/' .config
+          sed -i 's/CONFIG_PACKAGE_luci-app-rtsproxy=m/CONFIG_PACKAGE_luci-app-rtsproxy=y/' .config
+
+          make package/rtsproxy/compile V=s
+          make package/luci-app-rtsproxy/compile V=s
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p output
+          find sdk/bin/packages/ -name "rtsproxy*.ipk" -exec cp {} output/ \;
+          find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" -exec cp {} output/ \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtsproxy-ipk-test-aarch64
+          path: output/*.ipk
