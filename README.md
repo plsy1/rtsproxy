@@ -28,6 +28,7 @@
 客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
 - **STUN 支持**：**不支持**。适用于代理服务器拥有公网 IP 或与上游服务器在同一内网的环境。
+- **接口绑定**：**支持**。现在可以安全地绑定到上游网口（如 IPTV 专网），且数据依然能正确回传给局域网客户端（通过套接字分离技术）。
 - **访问格式**：
     - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
@@ -78,12 +79,17 @@ Options:
   -n, --enable-nat              开启 NAT 穿越 (仅 HTTP 模式有效)
   -r, --rtp-buffer-size <size>  设置 RTP 缓冲区包数量 (默认: 8192)
   -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 1500)
-  -i, --set-interface   <iface> 设置上游出接口
+  -l, --listen-interface <iface> 设置服务监听网口 (下游)
+      --http-interface  <iface> 设置 HTTP 模式上游网口
+      --mitm-interface  <iface> 设置 MITM 模式上游网口
   -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
   -d, --daemon                  后台运行
   -w, --watchdog                开启自动重启模式
   -k, --kill                    杀死正在运行的实例
 ```
+
+> [!TIP]
+> **多接口支持**：现在你可以为 HTTP 模式和 MITM 模式分别指定上游网口（例如分别走两个不同的 IPTV 专网），并可以限定服务只在特定的本地网口（如 `br-lan`）监听。
 
 ---
 
