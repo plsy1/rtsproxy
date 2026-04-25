@@ -72,7 +72,7 @@ IPK_ARCH_TAG=""
 # 5. 检查是否有匹配系统的核心 IPK
 if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
     case "$OWRT_ARCH" in
-        x86_64) IPK_ARCH_TAG="x86_64" ;;
+        x86_64) IPK_ARCH_TAG="x64" ;;
         aarch64_*) IPK_ARCH_TAG="aarch64" ;;
     esac
     if [ -n "$IPK_ARCH_TAG" ]; then
