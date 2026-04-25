@@ -501,6 +501,17 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
     return replace_header(req, "Transport", new_transport);
 }
 
+std::string RTSPMitmClient::patch_transport_for_upstream_tcp(const std::string &req)
+{
+    std::string transport = extract_header_value(req, "Transport");
+    if (transport.empty()) return req;
+
+    // Force TCP interleaved mode for upstream
+    std::string new_transport = "RTP/AVP/TCP;unicast;interleaved=0-1";
+    
+    return replace_header(req, "Transport", new_transport);
+}
+
 // Remove old patch_transport_for_client implementation since it's merged into patch_response_for_client
 // (I will just delete it in the next chunk or here)
 
@@ -694,6 +705,25 @@ void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8
     }
 }
 
+void RTSPMitmClient::handle_interleaved_from_upstream(uint8_t channel, const uint8_t *data, size_t len)
+{
+    // Relay RTP/RTCP from upstream (TCP) to downstream
+    if (channel == us_interleaved_rtp_)
+    {
+        if (is_downstream_tcp_)
+            send_interleaved_downstream(ds_interleaved_rtp_, data, len);
+        else if (client_rtp_addr_.sin_port != 0)
+            sendto(rtp_ds_fd_, data, len, 0, (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
+    }
+    else if (channel == us_interleaved_rtcp_)
+    {
+        if (is_downstream_tcp_)
+            send_interleaved_downstream(ds_interleaved_rtcp_, data, len);
+        else if (client_rtcp_addr_.sin_port != 0)
+            sendto(rtcp_ds_fd_, data, len, 0, (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
+    }
+}
+
 void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
 {
     while (true)
@@ -847,6 +877,7 @@ void RTSPMitmClient::on_downstream_readable()
                 relay_ready_ = true;
             }
 
+            last_setup_req_ = req; // Store for potential TCP fallback
             req = patch_transport_for_upstream(req);
         }
 
@@ -994,14 +1025,29 @@ void RTSPMitmClient::on_upstream_readable()
     buf[n] = 0;
     upstream_recv_buf_.append(buf, n);
 
-    // Forward complete RTSP responses back to the downstream client.
-    while (true)
+    // Forward complete RTSP responses or handle Interleaved packets
+    while (!upstream_recv_buf_.empty())
     {
+        if (upstream_recv_buf_[0] == '$')
+        {
+            if (upstream_recv_buf_.size() < 4)
+                break;
+            
+            uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(upstream_recv_buf_.data() + 2));
+            if (upstream_recv_buf_.size() < static_cast<size_t>(len) + 4)
+                break;
+
+            uint8_t channel = static_cast<uint8_t>(upstream_recv_buf_[1]);
+            handle_interleaved_from_upstream(channel, reinterpret_cast<const uint8_t *>(upstream_recv_buf_.data() + 4), len);
+            upstream_recv_buf_.erase(0, 4 + len);
+            continue;
+        }
+
         size_t end = upstream_recv_buf_.find("\r\n\r\n");
         if (end == std::string::npos)
             break;
 
-        // A DESCRIBE response may have a body (SDP).  Read Content-Length.
+        // A response may have a body (SDP). Read Content-Length.
         size_t body_len = 0;
         std::string cl_val = extract_header_value(
             upstream_recv_buf_.substr(0, end + 4), "Content-Length");
@@ -1027,11 +1073,41 @@ void RTSPMitmClient::on_upstream_readable()
         // Parse session id if present.
         rtspParser::parse_session_id(resp, ctx_);
 
+        int status = rtspParser::parse_status_code(resp);
+
+        // -----------------------------------------------------------
+        // Auto-fallback to TCP if UDP is not supported (Status 461)
+        // -----------------------------------------------------------
+        if (status == 461 && !setup_retry_with_tcp_ && !last_setup_req_.empty())
+        {
+            Logger::warn("[MITM] Upstream rejected UDP Transport (461). Retrying with TCP Interleaved...");
+            setup_retry_with_tcp_ = true;
+            std::string retry_req = patch_transport_for_upstream_tcp(last_setup_req_);
+            
+            // Rewrite URI if needed
+            retry_req = rewrite_request_for_upstream(retry_req);
+            
+            to_upstream_q_.push_back(retry_req);
+            on_upstream_writable(); // Trigger immediate send
+            continue; // Consume the 461 response, don't send to client yet
+        }
+
+        // If it's a 200 OK for SETUP, check if it's TCP interleaved
+        if (status == 200 && resp.find("interleaved=") != std::string::npos)
+        {
+            if (extract_interleaved_channels(resp, us_interleaved_rtp_, us_interleaved_rtcp_))
+            {
+                is_upstream_tcp_ = true;
+                Logger::info("[MITM] Upstream confirmed TCP interleaved: " +
+                             std::to_string(us_interleaved_rtp_) + "-" +
+                             std::to_string(us_interleaved_rtcp_));
+            }
+        }
+
         // Apply robust response patching (Transport, Content-Base, etc.)
         resp = patch_response_for_client(resp);
 
         // Detect PLAY response -> start streaming state.
-        int status = rtspParser::parse_status_code(resp);
         if (status == 200 && pending_play_)
         {
             pending_play_ = false;
@@ -1042,13 +1118,16 @@ void RTSPMitmClient::on_upstream_readable()
                              " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) +
                              ":" + std::to_string(ntohs(client_addr_.sin_port)));
                 init_timer_fd();
-                send_rtp_trigger();
+                
+                if (!is_upstream_tcp_) {
+                    send_rtp_trigger();
+                }
             }
         }
 
         to_downstream_q_.push_back(resp);
         loop_->set(downstream_ctx_.get(), downstream_fd_,
-                   EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
+                   EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT | EPOLLIN);
     }
 }
 

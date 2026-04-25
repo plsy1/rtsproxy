@@ -110,6 +110,12 @@ private:
     // Handle an interleaved packet received from the downstream client.
     void handle_interleaved_from_client(uint8_t channel, const uint8_t *data, size_t len);
 
+    // Handle an interleaved packet received from the upstream server.
+    void handle_interleaved_from_upstream(uint8_t channel, const uint8_t *data, size_t len);
+
+    // Patch the SETUP request for TCP interleaved mode.
+    std::string patch_transport_for_upstream_tcp(const std::string &req);
+
     // Send accumulated data from a queue over a TCP fd.
     // Returns false on unrecoverable error.
     bool drain_tcp_queue(std::deque<std::string> &q, FdGuard &fd,
@@ -179,6 +185,12 @@ private:
     bool is_downstream_tcp_{false};
     uint8_t ds_interleaved_rtp_{0};
     uint8_t ds_interleaved_rtcp_{1};
+
+    bool is_upstream_tcp_{false};
+    uint8_t us_interleaved_rtp_{0};
+    uint8_t us_interleaved_rtcp_{1};
+    bool setup_retry_with_tcp_{false};
+    std::string last_setup_req_;
 
     rtspCtx ctx_; // parsed URL info for upstream
 
