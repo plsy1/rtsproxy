@@ -96,3 +96,21 @@ cd build && ninja
 # 运行
 ./rtsproxy
 ```
+
+---
+
+## OpenWrt 支持
+
+本项目已内置 OpenWrt 编译脚本与 LuCI 管理界面。
+
+### 编译步骤
+1. 在 OpenWrt 源码根目录下创建软链接指向本项目：
+   `ln -s /path/to/rtsproxy package/rtsproxy`
+2. 运行 `make menuconfig`，在 `Network` 菜单中选中 `rtsproxy`，在 `LuCI -> Applications` 中选中 `luci-app-rtsproxy`。
+3. 运行 `make package/rtsproxy/compile V=s` 进行编译。
+
+> **注意**：当前的 Makefile 已配置为使用本地源码模式（`Build/Prepare` 会从 `package/rtsproxy` 所在位置复制文件）。
+
+### 配置文件
+- UCI 配置：`/etc/config/rtsproxy`
+- 启动脚本：`/etc/init.d/rtsproxy`

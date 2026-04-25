@@ -1,0 +1,86 @@
+name: Build OpenWrt Packages
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: aarch64_generic
+            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: mips_24kc
+            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/ath79/generic/openwrt-sdk-23.05.0-ath79-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils
+
+      - name: Cache SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: sdk-${{ matrix.arch }}-${{ hashFiles('**/Makefile') }}
+
+      - name: Download and setup SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir sdk
+          wget -qO- ${{ matrix.sdk_url }} | tar xJ -C sdk --strip-components=1
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Build Packages
+        run: |
+          cd sdk
+          # Link the project into the SDK package directory
+          ln -s $GITHUB_WORKSPACE package/rtsproxy_project
+          
+          # Fix paths for the Makefile (which expects to be in package/rtsproxy)
+          mkdir -p package/rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
+          
+          # Same for LuCI app
+          mkdir -p package/luci-app-rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/ 2>/dev/null || true
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
+
+          # Configure the packages
+          make defconfig
+          sed -i 's/CONFIG_PACKAGE_rtsproxy=m/CONFIG_PACKAGE_rtsproxy=y/' .config
+          sed -i 's/CONFIG_PACKAGE_luci-app-rtsproxy=m/CONFIG_PACKAGE_luci-app-rtsproxy=y/' .config
+
+          # Compile
+          make package/rtsproxy/compile V=s
+          make package/luci-app-rtsproxy/compile V=s
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p output
+          find sdk/bin/packages/ -name "rtsproxy*.ipk" -exec cp {} output/ \;
+          find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" -exec cp {} output/ \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtsproxy-ipk-${{ matrix.arch }}
+          path: output/*.ipk

@@ -1,0 +1,59 @@
+#!/etc/init.d/rc.common
+
+START=99
+USE_PROCD=1
+
+CONF="rtsproxy"
+PROG="/usr/bin/rtsproxy"
+
+start_service() {
+	local enabled
+	local port
+	local enable_nat
+	local rtp_buffer_size
+	local udp_packet_size
+	local auth_token
+	local interface
+	local json_path
+	local watchdog
+
+	config_load "$CONF"
+	config_get_bool enabled "main" "enabled" 0
+	[ "$enabled" -eq 0 ] && return
+
+	config_get port "main" "port" "8554"
+	config_get_bool enable_nat "main" "enable_nat" 0
+	config_get rtp_buffer_size "main" "rtp_buffer_size" "8192"
+	config_get udp_packet_size "main" "udp_packet_size" "1500"
+	config_get auth_token "main" "auth_token" ""
+	config_get interface "main" "interface" ""
+	config_get json_path "main" "json_path" "/etc/rtsproxy/config.json"
+	config_get_bool watchdog "main" "watchdog" 1
+
+	procd_open_instance
+	procd_set_param command "$PROG"
+	procd_append_param command -p "$port"
+	procd_append_param command -r "$rtp_buffer_size"
+	procd_append_param command -u "$udp_packet_size"
+	procd_append_param command -j "$json_path"
+	
+	[ "$enable_nat" -eq 1 ] && procd_append_param command -n
+	[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
+	[ -n "$interface" ] && procd_append_param command -i "$interface"
+	[ "$watchdog" -eq 1 ] && procd_append_param command -w
+
+	# Run in background via procd
+	procd_set_param respawn
+	procd_set_param stderr 1
+	procd_set_param stdout 1
+	procd_close_instance
+}
+
+stop_service() {
+	# Procd handles stopping automatically
+	return 0
+}
+
+service_triggers() {
+	procd_add_reload_trigger "$CONF"
+}
