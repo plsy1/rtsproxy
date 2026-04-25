@@ -227,11 +227,22 @@ jobs:
           path: release
           pattern: "rtsproxy-*"
           merge-multiple: true
-      - name: UPX compress binaries
+      - name: Rename and UPX compress binaries
         run: |
           sudo apt-get install -y upx
-          chmod +x release/rtsproxy-*
-          for file in release/rtsproxy-linux-arm* release/rtsproxy-linux-x86_64*; do
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}" # remove 'v' prefix
+
+          cd release
+          # Rename rtsproxy-linux-* to rtsproxy-${VERSION}-linux-*
+          for file in rtsproxy-linux-*; do
+            [ -f "$file" ] || continue
+            new_file="rtsproxy-${VERSION}-${file#rtsproxy-}"
+            mv "$file" "$new_file"
+          done
+
+          chmod +x rtsproxy-*
+          for file in rtsproxy-*-linux-arm* rtsproxy-*-linux-x86_64*; do
             [ -f "$file" ] || continue
             upx --best --lzma "$file"
           done
