@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   linux:
@@ -72,8 +73,9 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -85,10 +87,10 @@ jobs:
           push: true
           platforms: ${{ matrix.docker_platforms }}
           tags: |
-            plsy1/rtsproxy:${{ github.event.release.tag_name || github.sha }}-${{ matrix.name }}
-            plsy1/rtsproxy:latest-${{ matrix.name }}
-          cache-from: type=registry,ref=plsy1/rtsproxy:buildcache
-          cache-to: type=registry,ref=plsy1/rtsproxy:buildcache,mode=max
+            ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name || github.sha }}-${{ matrix.name }}
+            ghcr.io/${{ github.repository }}:latest-${{ matrix.name }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max
 
   docker-manifest:
     runs-on: ubuntu-latest
@@ -96,12 +98,13 @@ jobs:
     steps:
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create multi-arch manifest
         run: |
           docker buildx imagetools create \
-            --tag plsy1/rtsproxy:latest \
-            plsy1/rtsproxy:latest-x86_64 \
-            plsy1/rtsproxy:latest-arm64
+            --tag ghcr.io/${{ github.repository }}:latest \
+            ghcr.io/${{ github.repository }}:latest-x86_64 \
+            ghcr.io/${{ github.repository }}:latest-arm64
