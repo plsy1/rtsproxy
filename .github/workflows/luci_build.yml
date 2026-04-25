@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build using build_openwrt.sh
+    name: Build LuCI App via Script
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -19,19 +19,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gawk xsltproc build-essential libncurses-dev zlib1g-dev rsync git unzip zstd
 
-      - name: Run build script
-        run: bash build_openwrt.sh
+      - name: Run LuCI build script
+        run: bash .github/workflows/build_luci.sh
 
-      - name: Collect artifacts
-        run: |
-          mkdir -p output
-          cp bin/openwrt/luci-app-rtsproxy*.ipk output/ 2>/dev/null || true
-          
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-rtsproxy-ipk
-          path: output/*.ipk
+          path: bin/openwrt/luci-app-rtsproxy*.ipk
 
   release:
     name: Release LuCI IPK
