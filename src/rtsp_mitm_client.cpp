@@ -251,6 +251,24 @@ bool RTSPMitmClient::extract_client_port(const std::string &req,
     return true;
 }
 
+bool RTSPMitmClient::extract_interleaved_channels(const std::string &req,
+                                                 uint8_t &rtp_chan, uint8_t &rtcp_chan)
+{
+    std::string transport = extract_header_value(req, "Transport");
+    if (transport.empty())
+        return false;
+
+    // interleaved=0-1
+    std::regex re(R"(interleaved=(\d+)-(\d+))");
+    std::smatch m;
+    if (!std::regex_search(transport, m, re))
+        return false;
+
+    rtp_chan = static_cast<uint8_t>(std::stoi(m[1]));
+    rtcp_chan = static_cast<uint8_t>(std::stoi(m[2]));
+    return true;
+}
+
 bool RTSPMitmClient::init_relay_sockets()
 {
     // 1. Allocate UPSTREAM-facing sockets (bound to mitm interface)
@@ -356,17 +374,44 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
 
         // Rewrite client_port back to original client ports.
         std::regex cp_re(R"(client_port=\d+-\d+)");
-        std::string client_rtp_str = std::to_string(ntohs(client_rtp_addr_.sin_port));
-        std::string client_rtcp_str = std::to_string(ntohs(client_rtcp_addr_.sin_port));
-        transport = std::regex_replace(
-            transport, cp_re,
-            "client_port=" + client_rtp_str + "-" + client_rtcp_str);
 
-        // Rewrite server_port to OUR downstream-facing relay ports.
-        transport = std::regex_replace(
-            transport, sp_re,
-            "server_port=" + std::to_string(local_rtp_ds_port_) + "-" +
-                std::to_string(local_rtcp_ds_port_));
+        if (is_downstream_tcp_)
+        {
+            // If downstream requested TCP, ensure the response says so.
+            if (transport.find("RTP/AVP/TCP") == std::string::npos)
+            {
+                size_t pos = transport.find("RTP/AVP");
+                if (pos != std::string::npos)
+                    transport.replace(pos, 7, "RTP/AVP/TCP");
+            }
+            // Remove server_port and client_port, replace with interleaved
+            transport = std::regex_replace(transport, cp_re, "");
+            transport = std::regex_replace(transport, sp_re, "");
+            
+            // Clean up double semicolons or trailing semicolons
+            while (transport.find(";;") != std::string::npos) transport.replace(transport.find(";;"), 2, ";");
+            if (!transport.empty() && transport.back() == ';') transport.pop_back();
+
+            if (transport.find("interleaved=") == std::string::npos)
+            {
+                transport += ";interleaved=" + std::to_string(ds_interleaved_rtp_) + "-" +
+                             std::to_string(ds_interleaved_rtcp_);
+            }
+        }
+        else
+        {
+            std::string client_rtp_str = std::to_string(ntohs(client_rtp_addr_.sin_port));
+            std::string client_rtcp_str = std::to_string(ntohs(client_rtcp_addr_.sin_port));
+            transport = std::regex_replace(
+                transport, cp_re,
+                "client_port=" + client_rtp_str + "-" + client_rtcp_str);
+
+            // Rewrite server_port to OUR downstream-facing relay ports.
+            transport = std::regex_replace(
+                transport, sp_re,
+                "server_port=" + std::to_string(local_rtp_ds_port_) + "-" +
+                    std::to_string(local_rtcp_ds_port_));
+        }
 
         // Rewrite source to our proxy IP
         std::regex src_re(R"(source=[0-9.]+)");
@@ -429,10 +474,29 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
         return req;
 
     std::regex re(R"(client_port=\d+-\d+)");
-    std::string new_transport = std::regex_replace(
-        transport, re,
-        "client_port=" + std::to_string(local_rtp_us_port_) + "-" +
-            std::to_string(local_rtcp_us_port_));
+    std::string new_transport = transport;
+
+    if (transport.find("RTP/AVP/TCP") != std::string::npos || transport.find("interleaved=") != std::string::npos)
+    {
+        // Convert TCP request to UDP for upstream
+        size_t pos = new_transport.find("RTP/AVP/TCP");
+        if (pos != std::string::npos)
+            new_transport.replace(pos, 11, "RTP/AVP");
+
+        std::regex int_re(R"(interleaved=\d+-\d+;?)");
+        new_transport = std::regex_replace(new_transport, int_re, "");
+        if (new_transport.back() == ';') new_transport.pop_back();
+
+        new_transport += ";client_port=" + std::to_string(local_rtp_us_port_) + "-" +
+                         std::to_string(local_rtcp_us_port_);
+    }
+    else
+    {
+        new_transport = std::regex_replace(
+            transport, re,
+            "client_port=" + std::to_string(local_rtp_us_port_) + "-" +
+                std::to_string(local_rtcp_us_port_));
+    }
 
     return replace_header(req, "Transport", new_transport);
 }
@@ -547,7 +611,11 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
         if (src.sin_port == server_rtp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
-            if (client_rtp_addr_.sin_port != 0)
+            if (is_downstream_tcp_)
+            {
+                send_interleaved_downstream(ds_interleaved_rtp_, rtp_relay_buf_, n);
+            }
+            else if (client_rtp_addr_.sin_port != 0)
             {
                 sendto(rtp_ds_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
@@ -571,11 +639,57 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         if (src.sin_port == server_rtcp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
-            if (client_rtcp_addr_.sin_port != 0)
+            if (is_downstream_tcp_)
+            {
+                send_interleaved_downstream(ds_interleaved_rtcp_, rtp_relay_buf_, n);
+            }
+            else if (client_rtcp_addr_.sin_port != 0)
             {
                 sendto(rtcp_ds_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
             }
+        }
+    }
+}
+
+void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t *data, size_t len)
+{
+    if (closed_ || downstream_fd_ < 0) return;
+
+    // Prepend $ <channel> <length>
+    std::string pkg;
+    pkg.reserve(4 + len);
+    pkg.push_back('$');
+    pkg.push_back(static_cast<char>(channel));
+    uint16_t nlen = htons(static_cast<uint16_t>(len));
+    pkg.append(reinterpret_cast<const char*>(&nlen), 2);
+    pkg.append(reinterpret_cast<const char*>(data), len);
+
+    to_downstream_q_.push_back(std::move(pkg));
+    
+    // We need to trigger EPOLLOUT to drain the queue
+    loop_->set(downstream_ctx_.get(), downstream_fd_,
+               EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN | EPOLLOUT);
+}
+
+void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8_t *data, size_t len)
+{
+    // Client sent something (usually RTCP) over TCP interleaved.
+    // Relay it to upstream via UDP.
+    if (channel == ds_interleaved_rtp_)
+    {
+        if (server_rtp_addr_.sin_port != 0)
+        {
+            sendto(rtp_us_fd_, data, len, 0,
+                   (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+        }
+    }
+    else if (channel == ds_interleaved_rtcp_)
+    {
+        if (server_rtcp_addr_.sin_port != 0)
+        {
+            sendto(rtcp_us_fd_, data, len, 0,
+                   (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
         }
     }
 }
@@ -664,9 +778,24 @@ void RTSPMitmClient::on_downstream_readable()
     buf[n] = 0;
     downstream_recv_buf_.append(buf, n);
 
-    // Wait for a complete RTSP message (ends with \r\n\r\n).
-    while (true)
+    // Wait for a complete RTSP message (ends with \r\n\r\n) or Interleaved packet ($)
+    while (!downstream_recv_buf_.empty())
     {
+        if (downstream_recv_buf_[0] == '$')
+        {
+            if (downstream_recv_buf_.size() < 4)
+                break;
+            
+            uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(downstream_recv_buf_.data() + 2));
+            if (downstream_recv_buf_.size() < static_cast<size_t>(len) + 4)
+                break;
+
+            uint8_t channel = static_cast<uint8_t>(downstream_recv_buf_[1]);
+            handle_interleaved_from_client(channel, reinterpret_cast<const uint8_t *>(downstream_recv_buf_.data() + 4), len);
+            downstream_recv_buf_.erase(0, 4 + len);
+            continue;
+        }
+
         size_t end = downstream_recv_buf_.find("\r\n\r\n");
         if (end == std::string::npos)
             break;
@@ -680,20 +809,32 @@ void RTSPMitmClient::on_downstream_readable()
         bool is_play  = (req.find("PLAY ") == 0);
         if (is_setup)
         {
-            // Remember the client's original RTP/RTCP ports.
-            uint16_t crtp = 0, crtcp = 0;
-            if (extract_client_port(req, crtp, crtcp))
+            // Detect if client wants TCP interleaved
+            if (extract_interleaved_channels(req, ds_interleaved_rtp_, ds_interleaved_rtcp_))
             {
-                client_rtp_addr_.sin_family = AF_INET;
-                client_rtp_addr_.sin_port = htons(crtp);
-                client_rtp_addr_.sin_addr = client_addr_.sin_addr;
+                is_downstream_tcp_ = true;
+                Logger::info("[MITM] Downstream using TCP interleaved: " +
+                             std::to_string(ds_interleaved_rtp_) + "-" +
+                             std::to_string(ds_interleaved_rtcp_));
+            }
+            else
+            {
+                is_downstream_tcp_ = false;
+                // Remember the client's original RTP/RTCP ports for UDP.
+                uint16_t crtp = 0, crtcp = 0;
+                if (extract_client_port(req, crtp, crtcp))
+                {
+                    client_rtp_addr_.sin_family = AF_INET;
+                    client_rtp_addr_.sin_port = htons(crtp);
+                    client_rtp_addr_.sin_addr = client_addr_.sin_addr;
 
-                client_rtcp_addr_.sin_family = AF_INET;
-                client_rtcp_addr_.sin_port = htons(crtcp);
-                client_rtcp_addr_.sin_addr = client_addr_.sin_addr;
+                    client_rtcp_addr_.sin_family = AF_INET;
+                    client_rtcp_addr_.sin_port = htons(crtcp);
+                    client_rtcp_addr_.sin_addr = client_addr_.sin_addr;
 
-                Logger::info("[MITM] Client RTP ports: " +
-                             std::to_string(crtp) + "-" + std::to_string(crtcp));
+                    Logger::info("[MITM] Client RTP ports: " +
+                                 std::to_string(crtp) + "-" + std::to_string(crtcp));
+                }
             }
 
             if (!relay_ready_)

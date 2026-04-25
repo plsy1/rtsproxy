@@ -100,6 +100,16 @@ private:
     // Handles Transport, Content-Base, RTP-Info and SDP.
     std::string patch_response_for_client(const std::string &resp);
 
+    // Extract interleaved channels from Transport header.
+    bool extract_interleaved_channels(const std::string &req,
+                                      uint8_t &rtp_chan, uint8_t &rtcp_chan);
+
+    // Send an interleaved RTP/RTCP packet to the downstream client.
+    void send_interleaved_downstream(uint8_t channel, const uint8_t *data, size_t len);
+
+    // Handle an interleaved packet received from the downstream client.
+    void handle_interleaved_from_client(uint8_t channel, const uint8_t *data, size_t len);
+
     // Send accumulated data from a queue over a TCP fd.
     // Returns false on unrecoverable error.
     bool drain_tcp_queue(std::deque<std::string> &q, FdGuard &fd,
@@ -165,6 +175,10 @@ private:
     sockaddr_in server_rtcp_addr_{};
 
     State state_{State::WAIT_UPSTREAM_CONNECT};
+
+    bool is_downstream_tcp_{false};
+    uint8_t ds_interleaved_rtp_{0};
+    uint8_t ds_interleaved_rtcp_{1};
 
     rtspCtx ctx_; // parsed URL info for upstream
 
