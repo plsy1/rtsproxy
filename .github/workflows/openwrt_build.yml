@@ -17,10 +17,10 @@ jobs:
         include:
           - arch: x86_64
             sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          - arch: aarch64_generic
-            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          - arch: mips_24kc
-            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/ath79/generic/openwrt-sdk-23.05.0-ath79-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          # - arch: aarch64_generic
+          #   sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          # - arch: mips_24kc
+          #   sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/ath79/generic/openwrt-sdk-23.05.0-ath79-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
 
     steps:
       - name: Checkout
@@ -50,9 +50,6 @@ jobs:
       - name: Build Packages
         run: |
           cd sdk
-          # Link the project into the SDK package directory
-          ln -s $GITHUB_WORKSPACE package/rtsproxy_project
-          
           # Fix paths for the Makefile (which expects to be in package/rtsproxy)
           mkdir -p package/rtsproxy
           cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
