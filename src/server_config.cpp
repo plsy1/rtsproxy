@@ -14,7 +14,9 @@ int ServerConfig::stun_server_port = 19302;
 std::string ServerConfig::stun_server_host = "stun.l.google.com";
 std::string ServerConfig::json_path = "config.json";
 std::string ServerConfig::auth_token = "";
-std::string ServerConfig::upstream_interface = "";
+std::string ServerConfig::http_upstream_interface = "";
+std::string ServerConfig::mitm_upstream_interface = "";
+std::string ServerConfig::listen_interface = "";
 
 void ServerConfig::setPort(int p)
 {
@@ -57,9 +59,19 @@ void ServerConfig::setToken(std::string token)
     auth_token = token;
 }
 
-void ServerConfig::setInterface(std::string iface)
+void ServerConfig::setHttpUpstreamInterface(std::string iface)
 {
-    upstream_interface = iface;
+    http_upstream_interface = iface;
+}
+
+void ServerConfig::setMitmUpstreamInterface(std::string iface)
+{
+    mitm_upstream_interface = iface;
+}
+
+void ServerConfig::setListenInterface(std::string iface)
+{
+    listen_interface = iface;
 }
 
 int ServerConfig::getPort()
@@ -103,9 +115,19 @@ std::string ServerConfig::getToken()
     return auth_token;
 }
 
-std::string ServerConfig::getInterface()
+std::string ServerConfig::getHttpUpstreamInterface()
 {
-    return upstream_interface;
+    return http_upstream_interface;
+}
+
+std::string ServerConfig::getMitmUpstreamInterface()
+{
+    return mitm_upstream_interface;
+}
+
+std::string ServerConfig::getListenInterface()
+{
+    return listen_interface;
 }
 
 void ServerConfig::printUsage(const std::string &program_name)
@@ -117,7 +139,9 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
     std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;
-    std::cout << "  -i, --set-interface   <iface> Set upstream interface" << std::endl;
+    std::cout << "      --http-interface  <iface> Set HTTP mode upstream interface" << std::endl;
+    std::cout << "      --mitm-interface  <iface> Set MITM mode upstream interface" << std::endl;
+    std::cout << "  -l, --listen-interface <iface> Set interface to listen on" << std::endl;
     std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
     std::cout << "  -w, --watchdog                Run in watchdog mode (auto-restart on crash)" << std::endl;

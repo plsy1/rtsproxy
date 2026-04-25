@@ -151,8 +151,10 @@ private:
     FdGuard timer_fd_;
 
     /* Local port numbers for the relay sockets */
-    uint16_t local_rtp_port_{0};   // our RTP relay port (facing upstream)
-    uint16_t local_rtcp_port_{0};  // our RTCP relay port (facing upstream)
+    uint16_t local_rtp_us_port_{0};   // our RTP port (facing upstream)
+    uint16_t local_rtcp_us_port_{0};  // our RTCP port (facing upstream)
+    uint16_t local_rtp_ds_port_{0};   // our RTP port (facing downstream)
+    uint16_t local_rtcp_ds_port_{0};  // our RTCP port (facing downstream)
 
     /* The actual client RTP/RTCP endpoints (where we forward RTP to) */
     sockaddr_in client_rtp_addr_{};

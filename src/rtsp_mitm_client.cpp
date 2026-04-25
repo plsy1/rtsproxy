@@ -211,7 +211,7 @@ void RTSPMitmClient::set_on_closed_callback(ClosedCallback cb)
 void RTSPMitmClient::connect_upstream()
 {
     upstream_fd_ = create_nonblocking_tcp(ctx_.server_ip, ctx_.server_rtsp_port,
-                                          ServerConfig::getInterface());
+                                          ServerConfig::getMitmUpstreamInterface());
     if (upstream_fd_ < 0)
     {
         Logger::error("[MITM] Failed to connect to upstream " + ctx_.server_ip +
@@ -253,44 +253,66 @@ bool RTSPMitmClient::extract_client_port(const std::string &req,
 
 bool RTSPMitmClient::init_relay_sockets()
 {
-    // Allocate our RTP/RTCP relay sockets (facing upstream).
-    if (bind_udp_socket_with_retry(rtp_us_fd_.get_ref(), local_rtp_port_, 5,
-                                   ServerConfig::getInterface()) < 0)
+    // 1. Allocate UPSTREAM-facing sockets (bound to mitm interface)
+    if (bind_udp_socket_with_retry(rtp_us_fd_.get_ref(), local_rtp_us_port_, 5,
+                                   ServerConfig::getMitmUpstreamInterface()) < 0)
     {
         Logger::error("[MITM] Failed to bind upstream-facing RTP socket");
         return false;
     }
-    local_rtcp_port_ = local_rtp_port_ + 1;
-    if (bind_udp_socket(rtcp_us_fd_.get_ref(), local_rtcp_port_,
-                        ServerConfig::getInterface()) < 0)
+    local_rtcp_us_port_ = local_rtp_us_port_ + 1;
+    if (bind_udp_socket(rtcp_us_fd_.get_ref(), local_rtcp_us_port_,
+                        ServerConfig::getMitmUpstreamInterface()) < 0)
     {
         Logger::error("[MITM] Failed to bind upstream-facing RTCP socket");
         return false;
     }
 
+    // 2. Allocate DOWNSTREAM-facing sockets (NOT bound to mitm interface, uses default route)
+    if (bind_udp_socket_with_retry(rtp_ds_fd_.get_ref(), local_rtp_ds_port_, 5) < 0)
+    {
+        Logger::error("[MITM] Failed to bind downstream-facing RTP socket");
+        return false;
+    }
+    local_rtcp_ds_port_ = local_rtp_ds_port_ + 1;
+    if (bind_udp_socket(rtcp_ds_fd_.get_ref(), local_rtcp_ds_port_) < 0)
+    {
+        Logger::error("[MITM] Failed to bind downstream-facing RTCP socket");
+        return false;
+    }
+
+    // Register all for EPOLLIN
     rtp_us_ctx_ = std::make_unique<SocketCtx>(
         rtp_us_fd_,
         [this](uint32_t ev) { handle_rtp_from_upstream(ev); });
     rtcp_us_ctx_ = std::make_unique<SocketCtx>(
         rtcp_us_fd_,
         [this](uint32_t ev) { handle_rtcp_from_upstream(ev); });
+    rtp_ds_ctx_ = std::make_unique<SocketCtx>(
+        rtp_ds_fd_,
+        [this](uint32_t ev) { handle_rtp_from_client(ev); });
+    rtcp_ds_ctx_ = std::make_unique<SocketCtx>(
+        rtcp_ds_fd_,
+        [this](uint32_t ev) { handle_rtcp_from_client(ev); });
 
     loop_->set(rtp_us_ctx_.get(), rtp_us_fd_, EPOLLIN);
     loop_->set(rtcp_us_ctx_.get(), rtcp_us_fd_, EPOLLIN);
+    loop_->set(rtp_ds_ctx_.get(), rtp_ds_fd_, EPOLLIN);
+    loop_->set(rtcp_ds_ctx_.get(), rtcp_ds_fd_, EPOLLIN);
 
     // Optimize UDP buffers using ServerConfig values
-    // rtp_buffer_size in config is number of packets, so we multiply by packet size.
     int total_buf_size = ServerConfig::getRtpBufferSize() * ServerConfig::getUdpPacketSize();
     if (total_buf_size < 1024 * 1024) total_buf_size = 2 * 1024 * 1024; // Min 2MB
 
-    setsockopt(rtp_us_fd_, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
-    setsockopt(rtp_us_fd_, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
-    setsockopt(rtcp_us_fd_, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
-    setsockopt(rtcp_us_fd_, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
+    auto optimize = [&](int fd) {
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
+    };
+    optimize(rtp_us_fd_); optimize(rtcp_us_fd_);
+    optimize(rtp_ds_fd_); optimize(rtcp_ds_fd_);
 
-    Logger::info("[MITM] Relay RTP ports: " + std::to_string(local_rtp_port_) +
-                 "-" + std::to_string(local_rtcp_port_) + " (Buffers: " + 
-                 std::to_string(total_buf_size / 1024) + " KB)");
+    Logger::info("[MITM] Relay ports: US=" + std::to_string(local_rtp_us_port_) + 
+                 ", DS=" + std::to_string(local_rtp_ds_port_));
     return true;
 }
 
@@ -340,11 +362,11 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
             transport, cp_re,
             "client_port=" + client_rtp_str + "-" + client_rtcp_str);
 
-        // Rewrite server_port to OUR relay ports.
+        // Rewrite server_port to OUR downstream-facing relay ports.
         transport = std::regex_replace(
             transport, sp_re,
-            "server_port=" + std::to_string(local_rtp_port_) + "-" +
-                std::to_string(local_rtcp_port_));
+            "server_port=" + std::to_string(local_rtp_ds_port_) + "-" +
+                std::to_string(local_rtcp_ds_port_));
 
         // Rewrite source to our proxy IP
         std::regex src_re(R"(source=[0-9.]+)");
@@ -409,8 +431,8 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
     std::regex re(R"(client_port=\d+-\d+)");
     std::string new_transport = std::regex_replace(
         transport, re,
-        "client_port=" + std::to_string(local_rtp_port_) + "-" +
-            std::to_string(local_rtcp_port_));
+        "client_port=" + std::to_string(local_rtp_us_port_) + "-" +
+            std::to_string(local_rtcp_us_port_));
 
     return replace_header(req, "Transport", new_transport);
 }
@@ -521,25 +543,14 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
         if (n <= 0)
             break;
 
+        // Packet from upstream server -> send to downstream client
         if (src.sin_port == server_rtp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
             if (client_rtp_addr_.sin_port != 0)
             {
-                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtp_ds_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
-            }
-        }
-        else if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
-        {
-            if (client_rtp_addr_.sin_port != src.sin_port) {
-                client_rtp_addr_.sin_port = src.sin_port;
-            }
-
-            if (server_rtp_addr_.sin_port != 0)
-            {
-                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
-                       (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
             }
         }
     }
@@ -556,16 +567,59 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         if (n <= 0)
             break;
 
+        // Packet from upstream server -> send to downstream client
         if (src.sin_port == server_rtcp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
             if (client_rtcp_addr_.sin_port != 0)
             {
-                sendto(rtcp_us_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtcp_ds_fd_, rtp_relay_buf_, n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
             }
         }
-        else if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
+    }
+}
+
+void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
+{
+    while (true)
+    {
+        sockaddr_in src{};
+        socklen_t slen = sizeof(src);
+        ssize_t n = recvfrom(rtp_ds_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+                             (sockaddr *)&src, &slen);
+        if (n <= 0)
+            break;
+
+        // Packet from downstream client -> send to upstream server
+        if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
+        {
+            if (client_rtp_addr_.sin_port != src.sin_port) {
+                client_rtp_addr_.sin_port = src.sin_port;
+            }
+
+            if (server_rtp_addr_.sin_port != 0)
+            {
+                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
+                       (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+            }
+        }
+    }
+}
+
+void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/)
+{
+    while (true)
+    {
+        sockaddr_in src{};
+        socklen_t slen = sizeof(src);
+        ssize_t n = recvfrom(rtcp_ds_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+                             (sockaddr *)&src, &slen);
+        if (n <= 0)
+            break;
+
+        // Packet from downstream client -> send to upstream server
+        if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
         {
             if (client_rtcp_addr_.sin_port != src.sin_port) {
                 client_rtcp_addr_.sin_port = src.sin_port;
@@ -579,9 +633,6 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         }
     }
 }
-
-void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/) {}
-void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/) {}
 
 void RTSPMitmClient::handle_timer(uint32_t /*events*/)
 {

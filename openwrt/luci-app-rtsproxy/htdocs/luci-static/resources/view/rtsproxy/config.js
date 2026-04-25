@@ -33,7 +33,15 @@ return view.extend({
 		o = s.option(form.Value, 'auth_token', _('Auth Token'), _('Optional token for authentication'));
 		o.password = true;
 
-		o = s.option(widgets.DeviceSelect, 'interface', _('Upstream Interface'), _('Bind to specific network interface (e.g. eth0, pppoe-wan)'));
+		o = s.option(widgets.DeviceSelect, 'http_interface', _('HTTP Upstream Interface'), _('Interface for HTTP proxy mode (IPTV)'));
+		o.noaliases = true;
+		o.rmempty = true;
+
+		o = s.option(widgets.DeviceSelect, 'mitm_interface', _('MITM Upstream Interface'), _('Interface for MITM transparent mode'));
+		o.noaliases = true;
+		o.rmempty = true;
+
+		o = s.option(widgets.DeviceSelect, 'listen_interface', _('Listen Interface'), _('Interface to listen on (Downstream)'));
 		o.noaliases = true;
 		o.rmempty = true;
 

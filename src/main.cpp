@@ -48,7 +48,9 @@ int main(int argc, char *argv[])
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
             {"set-auth-token", required_argument, nullptr, 't'},
-            {"set-interface", required_argument, nullptr, 'i'},
+            {"http-interface", required_argument, nullptr, 0},
+            {"mitm-interface", required_argument, nullptr, 0},
+            {"listen-interface", required_argument, nullptr, 'l'},
             {"set-json-path", required_argument, nullptr, 'j'},
             {"set-stun-port", required_argument, nullptr, 0},
             {"set-stun-host", required_argument, nullptr, 0},
@@ -60,7 +62,7 @@ int main(int argc, char *argv[])
     int opt;
     int longindex = -1;
     bool use_watchdog = false;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kdw", long_options, &longindex)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:l:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -82,8 +84,8 @@ int main(int argc, char *argv[])
         case 'j':
             ServerConfig::setJsonPath(optarg);
             break;
-        case 'i':
-            ServerConfig::setInterface(optarg);
+        case 'l':
+            ServerConfig::setListenInterface(optarg);
             break;
         case 'k':
             ServerConfig::kill_previous_instance();
@@ -107,6 +109,14 @@ int main(int argc, char *argv[])
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-host") == 0)
             {
                 ServerConfig::setStunHost(optarg);
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "http-interface") == 0)
+            {
+                ServerConfig::setHttpUpstreamInterface(optarg);
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "mitm-interface") == 0)
+            {
+                ServerConfig::setMitmUpstreamInterface(optarg);
             }
             break;
         default:
@@ -175,7 +185,7 @@ int main(int argc, char *argv[])
     BufferPool pool(ServerConfig::getUdpPacketSize(), ServerConfig::getRtpBufferSize());
 
     int listen_port = ServerConfig::getPort();
-    int listen_fd = create_listen_socket(listen_port);
+    int listen_fd = create_listen_socket(listen_port, ServerConfig::getListenInterface());
     if (listen_fd < 0)
         return -1;
 

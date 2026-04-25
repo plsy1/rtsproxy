@@ -13,7 +13,9 @@ start_service() {
 	local rtp_buffer_size
 	local udp_packet_size
 	local auth_token
-	local interface
+	local http_interface
+	local mitm_interface
+	local listen_interface
 	local json_path
 	local watchdog
 
@@ -26,7 +28,9 @@ start_service() {
 	config_get rtp_buffer_size "main" "rtp_buffer_size" "8192"
 	config_get udp_packet_size "main" "udp_packet_size" "1500"
 	config_get auth_token "main" "auth_token" ""
-	config_get interface "main" "interface" ""
+	config_get http_interface "main" "http_interface" ""
+	config_get mitm_interface "main" "mitm_interface" ""
+	config_get listen_interface "main" "listen_interface" ""
 	config_get json_path "main" "json_path" "/etc/rtsproxy/config.json"
 	config_get_bool watchdog "main" "watchdog" 1
 
@@ -39,7 +43,9 @@ start_service() {
 	
 	[ "$enable_nat" -eq 1 ] && procd_append_param command -n
 	[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
-	[ -n "$interface" ] && procd_append_param command -i "$interface"
+	[ -n "$http_interface" ] && procd_append_param command --http-interface "$http_interface"
+	[ -n "$mitm_interface" ] && procd_append_param command --mitm-interface "$mitm_interface"
+	[ -n "$listen_interface" ] && procd_append_param command -l "$listen_interface"
 	[ "$watchdog" -eq 1 ] && procd_append_param command -w
 
 	# Run in background via procd

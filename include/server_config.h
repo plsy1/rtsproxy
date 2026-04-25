@@ -13,7 +13,9 @@ public:
     static void setStunHost(std::string host);
     static void setJsonPath(std::string path);
     static void setToken(std::string token);
-    static void setInterface(std::string iface);
+    static void setHttpUpstreamInterface(std::string iface);
+    static void setMitmUpstreamInterface(std::string iface);
+    static void setListenInterface(std::string iface);
 
     static bool isNatEnabled();
     static int getPort();
@@ -23,7 +25,9 @@ public:
     static std::string getStunHost();
     static std::string getJsonPath();
     static std::string getToken();
-    static std::string getInterface();
+    static std::string getHttpUpstreamInterface();
+    static std::string getMitmUpstreamInterface();
+    static std::string getListenInterface();
     static void printUsage(const std::string &program_name);
 
     static void kill_previous_instance();
@@ -37,5 +41,7 @@ private:
     static std::string stun_server_host;
     static std::string json_path;
     static std::string auth_token;
-    static std::string upstream_interface;
+    static std::string http_upstream_interface;
+    static std::string mitm_upstream_interface;
+    static std::string listen_interface;
 };

@@ -9,7 +9,7 @@
 #include <random>
 #include <chrono>
 
-int create_listen_socket(int port)
+int create_listen_socket(int port, const std::string &iface)
 {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
@@ -17,6 +17,15 @@ int create_listen_socket(int port)
 
     int opt = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    if (!iface.empty())
+    {
+        if (setsockopt(sockfd, SOL_SOCKET, SO_BINDTODEVICE, iface.c_str(), iface.length()) < 0)
+        {
+            close(sockfd);
+            return -1;
+        }
+    }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
