@@ -48,3 +48,5 @@ musl-crossfile-x86_64.ini
 bin
 
 openwrt-sdk-x86_64
+toolchains
+build-static-x64
