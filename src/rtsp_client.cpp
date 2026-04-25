@@ -194,13 +194,44 @@ void RTSPClient::on_rtsp_readable()
         if (n > 0)
         {
             resp_buf_.append(rtsp_buf, n);
-            if (resp_buf_.find("\r\n\r\n") != std::string::npos)
+            while (!resp_buf_.empty())
             {
-                rtspParser::parse_session_id(resp_buf_, ctx);
-
-                if (rtspParser::parse_status_code(resp_buf_) != 200)
+                if (resp_buf_[0] == '$')
                 {
-                    Logger::error("[RTSP] Connection to upstream refused. Please verify if the URL is correct.");
+                    if (resp_buf_.size() < 4)
+                        break;
+                    uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(resp_buf_.data() + 2));
+                    if (resp_buf_.size() < static_cast<size_t>(len) + 4)
+                        break;
+
+                    uint8_t channel = static_cast<uint8_t>(resp_buf_[1]);
+                    handle_interleaved_packet(channel, reinterpret_cast<const uint8_t *>(resp_buf_.data() + 4), len);
+                    resp_buf_.erase(0, 4 + len);
+                    continue;
+                }
+
+                size_t end = resp_buf_.find("\r\n\r\n");
+                if (end == std::string::npos)
+                    break;
+
+                // Handle RTSP response
+                std::string resp = resp_buf_.substr(0, end + 4);
+                resp_buf_.erase(0, end + 4);
+
+                rtspParser::parse_session_id(resp, ctx);
+                int status = rtspParser::parse_status_code(resp);
+
+                if (status == 461 && current_request_.method == RtspMethod::SETUP && !setup_retry_with_tcp_)
+                {
+                    Logger::warn("[RTSP] Upstream rejected UDP SETUP (461). Retrying with TCP Interleaved...");
+                    setup_retry_with_tcp_ = true;
+                    send_rtsp_setup();
+                    continue;
+                }
+
+                if (status != 200)
+                {
+                    Logger::error("[RTSP] Connection to upstream refused. Status: " + std::to_string(status));
                     on_closed_callback_();
                     return;
                 }
@@ -209,42 +240,52 @@ void RTSPClient::on_rtsp_readable()
                 {
                     send_rtsp_describe();
                 }
-
                 else if (current_request_.method == RtspMethod::DESCRIBE)
                 {
-
                     send_rtsp_setup();
                 }
-
                 else if (current_request_.method == RtspMethod::SETUP)
                 {
-                    if (rtspParser::parse_server_ports(resp_buf_, ctx) != 0)
+                    if (rtspParser::parse_server_ports(resp, ctx) != 0)
                     {
                         Logger::error("Can't parser server port");
                         on_closed_callback_();
                         return;
                     }
 
-                    Logger::info(std::string("[RTSP] SETUP done, ready to PLAY, server port: " + std::to_string(ctx.server_rtp_port) + "-" + std::to_string(ctx.server_rtcp_port)));
-
-                    init_rtp_rtcp_server_addr();
-                    send_rtp_trigger();
+                    if (resp.find("interleaved=") != std::string::npos)
+                    {
+                        is_tcp_mode_ = true;
+                        interleaved_rtp_channel_ = static_cast<uint8_t>(ctx.server_rtp_port);
+                        interleaved_rtcp_channel_ = static_cast<uint8_t>(ctx.server_rtcp_port);
+                        Logger::info("[RTSP] SETUP done (TCP Interleaved), Channels: " + 
+                                     std::to_string(interleaved_rtp_channel_) + "-" + 
+                                     std::to_string(interleaved_rtcp_channel_));
+                    }
+                    else
+                    {
+                        is_tcp_mode_ = false;
+                        Logger::info(std::string("[RTSP] SETUP done (UDP), server port: " + 
+                                     std::to_string(ctx.server_rtp_port) + "-" + 
+                                     std::to_string(ctx.server_rtcp_port)));
+                        init_rtp_rtcp_server_addr();
+                        send_rtp_trigger();
+                    }
                     send_rtsp_play();
                 }
                 else if (current_request_.method == RtspMethod::PLAY)
                 {
-                    Logger::info(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url + " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) + ":" + std::to_string(ntohs(client_addr_.sin_port))));
+                    Logger::info(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
                     init_timer_fd();
                     state_ = RtspState::STREAMING;
                 }
-
-                resp_buf_.clear();
             }
         }
         else if (n == 0)
         {
             Logger::info("[RTSP] Server closed connection");
             on_closed_callback_();
+            return;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
@@ -254,6 +295,7 @@ void RTSPClient::on_rtsp_readable()
         {
             Logger::warn("[RTSP] Receive failed");
             on_closed_callback_();
+            return;
         }
     }
 }
@@ -309,6 +351,28 @@ void RTSPClient::on_rtcp_writable()
 
 void RTSPClient::on_rtcp_readable()
 {
+}
+
+void RTSPClient::handle_interleaved_packet(uint8_t channel, const uint8_t *data, size_t len)
+{
+    if (channel != interleaved_rtp_channel_)
+        return;
+
+    auto buf = buffer_pool_.acquire();
+    memcpy(buf.get(), data, std::min(len, static_cast<size_t>(1500))); // Max 1500 for consistency
+
+    size_t actual_len = std::min(len, static_cast<size_t>(1500));
+    if (get_rtp_payload_offset(buf.get(), actual_len, payload_offset))
+    {
+        send_queue_.push_back(Packet{std::move(buf), actual_len, payload_offset});
+    }
+    else
+    {
+        buffer_pool_.release(std::move(buf));
+    }
+
+    if (loop && client_fd_ >= 0 && client_ctx_)
+        loop->set(client_ctx_.get(), client_fd_, EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT | EPOLLIN);
 }
 
 void RTSPClient::on_client_writable()
@@ -584,10 +648,18 @@ void RTSPClient::send_rtsp_setup()
     int port1 = nat_wan_port ? nat_wan_port : rtp_port_;
     int port2 = port1 + 1;
 
-    std::string header = "Transport: RTP/AVP;unicast;client_port=" +
-                         std::to_string(port1) + "-" + std::to_string(port2) + "\r\n";
-
-    Logger::info("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
+    std::string header;
+    if (setup_retry_with_tcp_)
+    {
+        header = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n";
+        Logger::info("[RTSP] SETUP with TCP Interleaved mode");
+    }
+    else
+    {
+        header = "Transport: RTP/AVP;unicast;client_port=" +
+                 std::to_string(port1) + "-" + std::to_string(port2) + "\r\n";
+        Logger::info("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
+    }
 
     std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path + "/" + track;
     push_request_into_queue(RtspMethod::SETUP, url, header, "");

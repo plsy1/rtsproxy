@@ -83,6 +83,7 @@ private:
     void init_rtp_rtcp_sockets();
     void init_rtp_rtcp_server_addr();
     void init_timer_fd();
+    void handle_interleaved_packet(uint8_t channel, const uint8_t *data, size_t len);
     void connect_server();
     void push_request_into_queue(RtspMethod method, const std::string &uri, const std::string &extra_headers = "", const std::string &body = "");
     void build_and_send_request();
@@ -136,6 +137,11 @@ private:
 
     size_t tcp_send_offset_ = 0;
     size_t payload_offset = 0;
+
+    bool is_tcp_mode_{false};
+    uint8_t interleaved_rtp_channel_{0};
+    uint8_t interleaved_rtcp_channel_{1};
+    bool setup_retry_with_tcp_{false};
 
     FdGuard client_fd_;
     FdGuard rtsp_fd_;

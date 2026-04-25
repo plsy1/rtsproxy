@@ -134,6 +134,29 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
             }
         }
     }
+
+    size_t int_pos = transport_.find("interleaved=");
+    if (int_pos != std::string::npos)
+    {
+        int_pos += strlen("interleaved=");
+        size_t dash = transport_.find('-', int_pos);
+        if (dash != std::string::npos)
+        {
+            // For interleaved mode, we can store channels in port fields
+            // The caller (RTSPClient) will check for "interleaved" in the string anyway
+            try
+            {
+                ctx.server_rtp_port = std::stoi(transport_.substr(int_pos, dash - int_pos));
+                ctx.server_rtcp_port = std::stoi(transport_.substr(dash + 1));
+                return 0;
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+    }
+
     return -1;
 }
 
