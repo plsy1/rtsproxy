@@ -15,12 +15,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          # - arch: aarch64_generic
-          #   sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/rockchip/armv8/openwrt-sdk-23.05.0-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          # - arch: mips_24kc
-          #   sdk_url: https://downloads.openwrt.org/releases/23.05.0/targets/ath79/generic/openwrt-sdk-23.05.0-ath79-generic_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          # - arch: 23.05-x86_64
+          #   sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          # - arch: 23.05-aarch64
+          #   sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/rockchip/armv8/openwrt-sdk-23.05.5-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: 24.10-x86_64
+            sdk_url: https://downloads.openwrt.org/releases/24.10.0/targets/x86/64/openwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          # - arch: 24.10-aarch64
+          #   sdk_url: https://downloads.openwrt.org/releases/24.10.0/targets/rockchip/armv8/openwrt-sdk-24.10.0-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
 
     steps:
       - name: Checkout
@@ -29,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils
+          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils zstd
 
       - name: Cache SDK
         id: cache-sdk
@@ -42,7 +44,7 @@ jobs:
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           mkdir sdk
-          wget -qO- ${{ matrix.sdk_url }} | tar xJ -C sdk --strip-components=1
+          wget -qO- ${{ matrix.sdk_url }} | tar x -f - -C sdk --strip-components=1
           cd sdk
           ./scripts/feeds update -a
           ./scripts/feeds install -a
@@ -54,12 +56,20 @@ jobs:
           mkdir -p package/rtsproxy
           cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
           cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/src package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/include package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
           
           # Same for LuCI app
           mkdir -p package/luci-app-rtsproxy
           cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
           cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/ 2>/dev/null || true
           cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
+
+          # Force fix CRLF to LF just like build_openwrt.sh
+          find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
+
 
           # Configure the packages
           make defconfig
