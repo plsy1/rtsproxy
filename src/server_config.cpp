@@ -120,6 +120,7 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -i, --set-interface   <iface> Set upstream interface" << std::endl;
     std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
+    std::cout << "  -w, --watchdog                Run in watchdog mode (auto-restart on crash)" << std::endl;
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
     std::cout << "      --set-stun-host,  <port>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
     std::cout << "      --set-stun-port,  <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;

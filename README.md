@@ -7,7 +7,6 @@
 ## 核心特性
 
 - **统一端口**：HTTP 代理与 RTSP MITM 代理共用 8554 端口，自动识别协议。
-- **高性能转发**：RTSP 模式下采用 64KB 缓冲区排水技术，有效防止高码率下的报文截断和丢包。
 - **URL 重写**：支持通过正则规则重写上游地址，支持 `/rtp` 和 `/tv` 路径。
 - **多模式支持**：
     1. **HTTP 代理模式** (支持 STUN 打洞)
@@ -29,7 +28,6 @@
 客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
 - **STUN 支持**：**不支持**。适用于代理服务器拥有公网 IP 或与上游服务器在同一内网的环境。
-- **技术优势**：专为高码率 IPTV 优化，具备 64KB UDP 缓冲区和 `while(true)` 排水逻辑，彻底解决 `Packet corrupt` 问题。
 - **访问格式**：
     - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
@@ -83,6 +81,7 @@ Options:
   -i, --set-interface   <iface> 设置上游出接口
   -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
   -d, --daemon                  后台运行
+  -w, --watchdog                开启自动重启模式
   -k, --kill                    杀死正在运行的实例
 ```
 

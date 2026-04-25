@@ -13,6 +13,28 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <sys/wait.h>
+#include <signal.h>
+
+static pid_t worker_pid = 0;
+
+void crash_handler(int sig)
+{
+    // Use low-level logging or just exit since we are crashing
+    // Logger might not be safe here depending on its implementation, 
+    // but for now we'll try to log it.
+    std::cerr << "[WORKER] Crashed with signal " << sig << std::endl;
+    _exit(sig);
+}
+
+void supervisor_sig_handler(int sig)
+{
+    if (worker_pid > 0)
+    {
+        kill(worker_pid, sig);
+    }
+    _exit(0);
+}
 
 int main(int argc, char *argv[])
 {
@@ -32,11 +54,13 @@ int main(int argc, char *argv[])
             {"set-stun-host", required_argument, nullptr, 0},
             {"kill", no_argument, nullptr, 'k'},
             {"daemon", no_argument, nullptr, 'd'},
+            {"watchdog", no_argument, nullptr, 'w'},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
     int longindex = -1;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kd", long_options, &longindex)) != -1)
+    bool use_watchdog = false;
+    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:i:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -72,6 +96,9 @@ int main(int argc, char *argv[])
             }
             Logger::info("[SERVER] Running in daemon mode");
             break;
+        case 'w':
+            use_watchdog = true;
+            break;
         case 0:
             if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
             {
@@ -85,6 +112,60 @@ int main(int argc, char *argv[])
         default:
             ServerConfig::printUsage(argv[0]);
             return EXIT_FAILURE;
+        }
+    }
+
+    if (use_watchdog)
+    {
+        Logger::info("[SUPERVISOR] Starting in watchdog mode");
+        signal(SIGTERM, supervisor_sig_handler);
+        signal(SIGINT, supervisor_sig_handler);
+
+        while (true)
+        {
+            worker_pid = fork();
+            if (worker_pid == 0)
+            {
+                // Child process (Worker)
+                signal(SIGSEGV, crash_handler);
+                signal(SIGABRT, crash_handler);
+                signal(SIGFPE, crash_handler);
+                signal(SIGILL, crash_handler);
+                // Reset supervisor signals to default in worker
+                signal(SIGTERM, SIG_DFL);
+                signal(SIGINT, SIG_DFL);
+                break; // Exit supervisor loop and continue to main logic
+            }
+            else if (worker_pid > 0)
+            {
+                // Parent process (Supervisor)
+                int status;
+                waitpid(worker_pid, &status, 0);
+                if (WIFEXITED(status))
+                {
+                    int exit_code = WEXITSTATUS(status);
+                    if (exit_code == 0)
+                    {
+                        Logger::info("[SUPERVISOR] Worker exited normally. Shutting down.");
+                        return 0;
+                    }
+                    else
+                    {
+                        Logger::error("[SUPERVISOR] Worker exited with code " + std::to_string(exit_code) + ". Restarting in 2 seconds...");
+                    }
+                }
+                else if (WIFSIGNALED(status))
+                {
+                    int sig = WTERMSIG(status);
+                    Logger::error("[SUPERVISOR] Worker killed by signal " + std::to_string(sig) + ". Restarting in 2 seconds...");
+                }
+                sleep(2);
+            }
+            else
+            {
+                Logger::error("[SUPERVISOR] Fork failed: " + std::string(strerror(errno)));
+                return -1;
+            }
         }
     }
 
