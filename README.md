@@ -125,6 +125,43 @@ cd build && ninja
 
 ---
 
+## Docker 部署
+
+本项目提供官方 Docker 镜像，托管于 GitHub Container Registry (GHCR)。
+
+### 1. 使用 Docker Compose (推荐)
+
+在项目根目录下创建一个 `compose.yml` 文件：
+
+```yaml
+services:
+  rtsproxy:
+    image: ghcr.io/plsy1/rtsproxy:latest
+    container_name: rtsproxy
+    ports:
+      - 8554:8554
+    restart: always
+    # 如需传递启动参数（如开启 NAT 穿越），取消下行注释
+    # command: "--enable-nat"
+```
+
+**启动服务：**
+```bash
+docker compose up -d
+```
+
+### 2. 命令行启动
+
+```bash
+docker run -d \
+  --name rtsproxy \
+  -p 8554:8554 \
+  --restart always \
+  ghcr.io/plsy1/rtsproxy:latest
+```
+
+---
+
 ## OpenWrt 支持
 
 本项目深度适配 OpenWrt 系统，提供了完整的 LuCI 控制面板以及自动化安装方案。
