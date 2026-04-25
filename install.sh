@@ -64,48 +64,52 @@ if [ -z "$BIN_ARCH" ]; then
     esac
 fi
 
-# 4. 下载并安装 LuCI 界面
+# 4. 准备下载
 LUCI_IPK="luci-app-rtsproxy_${VERSION}-r1_all.ipk"
-echo "[*] 正在下载 LuCI 界面: $LUCI_IPK"
-wget -qO "/tmp/$LUCI_IPK" "$GITHUB_DOWNLOAD/$TAG/$LUCI_IPK"
+CORE_IPK=""
+IPK_ARCH_TAG=""
 
-echo "[*] 正在安装 LuCI 界面..."
-opkg install "/tmp/$LUCI_IPK" --force-reinstall
-rm -f "/tmp/$LUCI_IPK"
-
-# 5. 尝试安装匹配的 IPK 本包
-INSTALLED_CORE=0
-
-# 只针对我们编译矩阵中有的版本和架构尝试 IPK
+# 5. 检查是否有匹配系统的核心 IPK
 if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
-    IPK_ARCH_TAG=""
     case "$OWRT_ARCH" in
         x86_64) IPK_ARCH_TAG="x86_64" ;;
         aarch64_*) IPK_ARCH_TAG="aarch64" ;;
     esac
-
     if [ -n "$IPK_ARCH_TAG" ]; then
         CORE_IPK="rtsproxy_${VERSION}-r1_openwrt-${OWRT_MAJOR}-${IPK_ARCH_TAG}.ipk"
-        echo "[*] 尝试下载匹配系统的 IPK: $CORE_IPK"
-        if wget -qO "/tmp/$CORE_IPK" "$GITHUB_DOWNLOAD/$TAG/$CORE_IPK"; then
-            echo "[*] 正在安装核心程序 IPK..."
-            if opkg install "/tmp/$CORE_IPK" --force-reinstall; then
-                INSTALLED_CORE=1
-            fi
-            rm -f "/tmp/$CORE_IPK"
-        fi
     fi
 fi
 
-# 6. 如果 IPK 安装失败或不匹配，则回退到静态二进制文件
+echo "[*] 正在从 GitHub 下载安装包..."
+wget -qO "/tmp/$LUCI_IPK" "$GITHUB_DOWNLOAD/$TAG/$LUCI_IPK"
+
+INSTALLED_CORE=0
+if [ -n "$CORE_IPK" ]; then
+    echo "[*] 发现匹配系统的核心 IPK: $CORE_IPK"
+    if wget -qO "/tmp/$CORE_IPK" "$GITHUB_DOWNLOAD/$TAG/$CORE_IPK"; then
+        echo "[*] 正在同时安装核心程序和 LuCI 界面..."
+        # 同时安装两个包可以自动解决依赖关系
+        if opkg install "/tmp/$CORE_IPK" "/tmp/$LUCI_IPK" --force-reinstall; then
+            INSTALLED_CORE=1
+        else
+            echo "[!] IPK 安装失败，准备尝试静态二进制回退方案..."
+        fi
+        rm -f "/tmp/$CORE_IPK"
+    fi
+fi
+
+# 6. 回退方案：安装 LuCI 并下载静态二进制
 if [ "$INSTALLED_CORE" -eq 0 ]; then
     if [ -z "$BIN_ARCH" ]; then
         echo "错误: 无法确定适用于您架构的静态二进制文件 ($OWRT_ARCH)"
         exit 1
     fi
 
+    echo "[*] 正在通过强制依赖模式安装 LuCI 界面..."
+    opkg install "/tmp/$LUCI_IPK" --force-depends --force-reinstall
+
     BIN_FILE="rtsproxy-${VERSION}-linux-$BIN_ARCH"
-    echo "[!] 未找到匹配的 IPK 或安装失败，回退到静态二进制: $BIN_FILE"
+    echo "[!] 准备下载并安装静态二进制文件: $BIN_FILE"
     
     if wget -qO "/usr/bin/rtsproxy" "$GITHUB_DOWNLOAD/$TAG/$BIN_FILE"; then
         chmod +x /usr/bin/rtsproxy
@@ -116,6 +120,8 @@ if [ "$INSTALLED_CORE" -eq 0 ]; then
         exit 1
     fi
 fi
+
+rm -f "/tmp/$LUCI_IPK"
 
 # 7. 启动服务
 echo "[*] 正在启动 RTSP Proxy 服务..."
