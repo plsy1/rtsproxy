@@ -1,0 +1,11 @@
+{
+	"luci-app-rtsproxy": {
+		"description": "Grant access to rtsproxy configuration",
+		"read": {
+			"uci": [ "rtsproxy" ]
+		},
+		"write": {
+			"uci": [ "rtsproxy" ]
+		}
+	}
+}

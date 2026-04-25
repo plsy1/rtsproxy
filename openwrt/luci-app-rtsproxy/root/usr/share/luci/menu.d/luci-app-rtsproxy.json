@@ -1,0 +1,14 @@
+{
+	"admin/services/rtsproxy": {
+		"title": "RTSProxy",
+		"action": {
+			"type": "view",
+			"path": "rtsproxy/config"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-rtsproxy"
+			]
+		}
+	}
+}

@@ -1,5 +1,8 @@
 # Prerequisites
 *.d
+# Whitelist LuCI directories ending in .d
+!**/usr/share/luci/menu.d/
+!**/usr/share/rpcd/acl.d/
 
 # Compiled Object files
 *.slo
