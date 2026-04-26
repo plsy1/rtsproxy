@@ -88,11 +88,9 @@ jobs:
           # 提取主版本号 (移除 -rX)
           VERSION="${VERSION_FULL%-r*}"
           # 提取修订号
-          REVISION_NUM="${VERSION_FULL##*-r}"
-          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+          REVISION="${VERSION_FULL##*-r}"
+          if [ "$REVISION" = "$VERSION_FULL" ]; then
             REVISION="1"
-          else
-            REVISION=$((REVISION_NUM + 1))
           fi
 
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/rtsproxy/Makefile

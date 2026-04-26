@@ -239,18 +239,16 @@ jobs:
           VERSION_FULL="${TAG_NAME#v}"
           # 提取主版本号 (移除 -rX)
           VERSION="${VERSION_FULL%-r*}"
-          REVISION_NUM="${VERSION_FULL##*-r}"
-          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+          REVISION="${VERSION_FULL##*-r}"
+          if [ "$REVISION" = "$VERSION_FULL" ]; then
             REVISION="1"
-          else
-            REVISION=$((REVISION_NUM + 1))
           fi
 
           cd release
-          # Rename rtsproxy-linux-* to rtsproxy-${VERSION}-r${REVISION}-linux-*
+          # Rename rtsproxy-linux-* to rtsproxy-${VERSION_FULL}-linux-*
           for file in rtsproxy-linux-*; do
             [ -f "$file" ] || continue
-            new_file="rtsproxy-${VERSION}-r${REVISION}-${file#rtsproxy-}"
+            new_file="rtsproxy-${VERSION_FULL}-${file#rtsproxy-}"
             mv "$file" "$new_file"
           done
 

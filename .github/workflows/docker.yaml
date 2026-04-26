@@ -90,11 +90,9 @@ jobs:
           fi
           VERSION_FULL="${TAG_NAME#v}"
           VERSION="${VERSION_FULL%-r*}"
-          REVISION_NUM="${VERSION_FULL##*-r}"
-          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+          REVISION="${VERSION_FULL##*-r}"
+          if [ "$REVISION" = "$VERSION_FULL" ]; then
             REVISION="1"
-          else
-            REVISION=$((REVISION_NUM + 1))
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
@@ -134,11 +132,9 @@ jobs:
           fi
           VERSION_FULL="${TAG_NAME#v}"
           VERSION="${VERSION_FULL%-r*}"
-          REVISION_NUM="${VERSION_FULL##*-r}"
-          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+          REVISION="${VERSION_FULL##*-r}"
+          if [ "$REVISION" = "$VERSION_FULL" ]; then
             REVISION="1"
-          else
-            REVISION=$((REVISION_NUM + 1))
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
