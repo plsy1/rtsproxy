@@ -83,17 +83,9 @@ jobs:
             TAG_NAME="${{ github.ref_name }}"
           fi
           
-          # 移除 v 前缀
+          # 移除 v 前缀，直接使用完整的版本字符串（如 0.2.3 或 0.2.3-r1）
           VERSION_FULL="${TAG_NAME#v}"
-          # 提取主版本号 (移除 -rX)
-          VERSION="${VERSION_FULL%-r*}"
-          # 提取修订号
-          REVISION="${VERSION_FULL##*-r}"
-          if [ "$REVISION" = "$VERSION_FULL" ]; then
-            REVISION="1"
-          fi
 
-          # 使用完整的版本字符串（如 0.2.3-r1）作为 PKG_VERSION
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/rtsproxy/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/rtsproxy/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/luci-app-rtsproxy/Makefile
