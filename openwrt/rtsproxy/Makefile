@@ -29,6 +29,11 @@ define Package/rtsproxy/description
   A high-performance RTSP proxy with unified port support, URL rewriting, and NAT traversal.
 endef
 
+define Package/rtsproxy/conffiles
+/etc/config/rtsproxy
+/etc/rtsproxy/config.json
+endef
+
 define Package/rtsproxy/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/rtsproxy $(1)/usr/bin/
