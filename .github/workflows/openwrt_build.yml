@@ -86,10 +86,10 @@ jobs:
           # 移除 v 前缀
           VERSION_FULL="${TAG_NAME#v}"
 
-          # 提取版本号和修订号（如 0.2.3-r2 提取为 0.2.3 和 r2）
+          # 提取版本号和修订号（如 0.2.3-r2 提取为 0.2.3 和 2）
           if echo "$VERSION_FULL" | grep -q '.*-r[0-9]\+$'; then
             PKG_VER=$(echo "$VERSION_FULL" | sed 's/-r[0-9]\+$//')
-            PKG_REL=$(echo "$VERSION_FULL" | grep -o 'r[0-9]\+$')
+            PKG_REL=$(echo "$VERSION_FULL" | grep -o 'r[0-9]\+$' | tr -d 'r')
           else
             PKG_VER="$VERSION_FULL"
             PKG_REL="1"
