@@ -5,7 +5,7 @@
 set -e
 
 REPO="plsy1/rtsproxy"
-GITHUB_API="https://api.github.com/repos/$REPO/releases/latest"
+GITHUB_API="https://api.github.com/repos/$REPO/releases"
 GITHUB_DOWNLOAD="https://github.com/$REPO/releases/download"
 
 echo "==============================================="
@@ -32,9 +32,8 @@ echo "[*] 系统架构: $OWRT_ARCH ($UNAME_M)"
 
 # 2. 获取最新版本号
 echo "[*] 正在从 GitHub 获取最新版本信息..."
-# 使用 wget 获取 JSON 并解析 tag_name (简单解析)
-VERSION_JSON=$(wget -qO- "$GITHUB_API")
-TAG=$(echo "$VERSION_JSON" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+# 获取发布列表中的第一个 tag_name (最新发布的版本)
+TAG=$(wget -qO- "$GITHUB_API" | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
 VERSION=$(echo "$TAG" | sed 's/^v//')
 
 if [ -z "$VERSION" ]; then
@@ -65,7 +64,7 @@ if [ -z "$BIN_ARCH" ]; then
 fi
 
 # 4. 准备下载
-LUCI_IPK="luci-app-rtsproxy_${VERSION}-r1_all.ipk"
+LUCI_IPK="luci-app-rtsproxy_${VERSION}_all.ipk"
 CORE_IPK=""
 IPK_ARCH_TAG=""
 
@@ -76,7 +75,7 @@ if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
         aarch64_*) IPK_ARCH_TAG="aarch64" ;;
     esac
     if [ -n "$IPK_ARCH_TAG" ]; then
-        CORE_IPK="rtsproxy_${VERSION}-r1_openwrt-${OWRT_MAJOR}-${IPK_ARCH_TAG}.ipk"
+        CORE_IPK="rtsproxy_${VERSION}_openwrt-${OWRT_MAJOR}-${IPK_ARCH_TAG}.ipk"
     fi
 fi
 
