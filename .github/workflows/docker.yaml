@@ -5,15 +5,6 @@ on:
     types:
       - published
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag to build for (e.g. v0.2.3 or v0.2.3-r2)'
-        required: true
-        default: 'v1.0.0'
-      revision:
-        description: 'Revision (r1, r2...) - ignored if tag has -r suffix'
-        required: false
-        default: '1'
 
 permissions:
   contents: write
@@ -95,18 +86,20 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG_NAME="${{ github.event.release.tag_name }}"
           else
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
+            TAG_NAME="${{ github.ref_name }}"
           fi
           VERSION_FULL="${TAG_NAME#v}"
           VERSION="${VERSION_FULL%-r*}"
-          REVISION="${VERSION_FULL##*-r}"
-          if [ "$REVISION" = "$VERSION_FULL" ]; then
-            REVISION="${{ github.event.inputs.revision || '1' }}"
+          REVISION_NUM="${VERSION_FULL##*-r}"
+          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+            REVISION="1"
+          else
+            REVISION=$((REVISION_NUM + 1))
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "revision=${REVISION}" >> $GITHUB_OUTPUT
-          echo "full=${VERSION}-r${REVISION}" >> $GITHUB_OUTPUT
+          echo "full=${VERSION_FULL}" >> $GITHUB_OUTPUT
 
       - uses: docker/build-push-action@v6
         with:
@@ -137,18 +130,20 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG_NAME="${{ github.event.release.tag_name }}"
           else
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
+            TAG_NAME="${{ github.ref_name }}"
           fi
           VERSION_FULL="${TAG_NAME#v}"
           VERSION="${VERSION_FULL%-r*}"
-          REVISION="${VERSION_FULL##*-r}"
-          if [ "$REVISION" = "$VERSION_FULL" ]; then
-            REVISION="${{ github.event.inputs.revision || '1' }}"
+          REVISION_NUM="${VERSION_FULL##*-r}"
+          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+            REVISION="1"
+          else
+            REVISION=$((REVISION_NUM + 1))
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "revision=${REVISION}" >> $GITHUB_OUTPUT
-          echo "full=${VERSION}-r${REVISION}" >> $GITHUB_OUTPUT
+          echo "full=${VERSION_FULL}" >> $GITHUB_OUTPUT
 
       - name: Create multi-arch manifest
         run: |

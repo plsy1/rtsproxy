@@ -5,15 +5,6 @@ on:
     types:
       - published
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag to build for (e.g. v0.2.3 or v0.2.3-r2)'
-        required: true
-        default: 'v1.0.0'
-      revision:
-        description: 'Revision (r1, r2...) - ignored if tag has -r suffix'
-        required: false
-        default: '1'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -241,17 +232,18 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG_NAME="${{ github.event.release.tag_name }}"
           else
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
+            TAG_NAME="${{ github.ref_name }}"
           fi
           
           # 移除 v 前缀
           VERSION_FULL="${TAG_NAME#v}"
           # 提取主版本号 (移除 -rX)
           VERSION="${VERSION_FULL%-r*}"
-          # 提取修订号
-          REVISION="${VERSION_FULL##*-r}"
-          if [ "$REVISION" = "$VERSION_FULL" ]; then
-            REVISION="${{ github.event.inputs.revision || '1' }}"
+          REVISION_NUM="${VERSION_FULL##*-r}"
+          if [ "$REVISION_NUM" = "$VERSION_FULL" ]; then
+            REVISION="1"
+          else
+            REVISION=$((REVISION_NUM + 1))
           fi
 
           cd release
@@ -274,12 +266,32 @@ jobs:
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG_NAME="${{ github.event.release.tag_name }}"
           else
-            TAG_NAME="${{ github.event.inputs.tag_name }}"
+            TAG_NAME="${{ github.ref_name }}"
           fi
+          
+          # 移除 v 前缀
+          VERSION_FULL="${TAG_NAME#v}"
+          VERSION="${VERSION_FULL%-r*}"
+          
           # 尝试获取目标 tag
-          VERSION_TAG="${TAG_NAME%-r*}"
+          TARGET_TAG="$VERSION"
+          if [[ "$TAG_NAME" == v* ]]; then TARGET_TAG="v$VERSION"; fi
+          
+          if ! gh release view "$TARGET_TAG" >/dev/null 2>&1; then
+            TARGET_TAG="$TAG_NAME"
+          fi
+
+          echo "Target Release: $TARGET_TAG"
+
+          # 清理旧版本的同名资产 (例如上传 r2 时删除 r1)
+          EXISTING_ASSETS=$(gh release view "$TARGET_TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
+          for asset in $EXISTING_ASSETS; do
+            if [[ $asset =~ ^rtsproxy-${VERSION}-r[0-9]+- ]]; then
+              echo "Cleaning up old revision asset: $asset"
+              gh release delete-asset "$TARGET_TAG" "$asset" -y || true
+            fi
+          done
 
           for i in release/rtsproxy-*; do
-            gh release upload "$VERSION_TAG" "$i" --clobber || \
-            gh release upload "$TAG_NAME" "$i" --clobber
+            gh release upload "$TARGET_TAG" "$i" --clobber
           done
