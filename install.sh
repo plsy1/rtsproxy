@@ -80,11 +80,16 @@ if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
 fi
 
 echo "[*] 正在从 GitHub 下载安装包..."
-wget -qO "/tmp/$LUCI_IPK" "$GITHUB_DOWNLOAD/$TAG/$LUCI_IPK"
+if ! wget -qO "/tmp/$LUCI_IPK" "$GITHUB_DOWNLOAD/$TAG/$LUCI_IPK"; then
+    echo "[!] 错误: 无法下载 LuCI 安装包 ($LUCI_IPK)"
+    echo "    请确认 GitHub Release ($TAG) 中是否已包含该文件。"
+    exit 1
+fi
 
 INSTALLED_CORE=0
 if [ -n "$CORE_IPK" ]; then
     echo "[*] 发现匹配系统的核心 IPK: $CORE_IPK"
+    echo "[*] 正在下载核心程序..."
     if wget -qO "/tmp/$CORE_IPK" "$GITHUB_DOWNLOAD/$TAG/$CORE_IPK"; then
         echo "[*] 正在同时安装核心程序和 LuCI 界面..."
         # 同时安装两个包可以自动解决依赖关系
@@ -94,6 +99,8 @@ if [ -n "$CORE_IPK" ]; then
             echo "[!] IPK 安装失败，准备尝试静态二进制回退方案..."
         fi
         rm -f "/tmp/$CORE_IPK"
+    else
+        echo "[!] 警告: 无法下载核心 IPK，将尝试静态二进制方案。"
     fi
 fi
 
@@ -115,7 +122,7 @@ if [ "$INSTALLED_CORE" -eq 0 ]; then
         echo "[*] 静态二进制安装成功。"
         INSTALLED_CORE=1
     else
-        echo "错误: 无法下载静态二进制文件。"
+        echo "错误: 无法下载静态二进制文件 ($BIN_FILE)。"
         exit 1
     fi
 fi
