@@ -160,6 +160,32 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
     return -1;
 }
 
+int rtspParser::get_content_length(const std::string &resp)
+{
+    size_t pos = resp.find("Content-Length:");
+    if (pos == std::string::npos)
+        pos = resp.find("Content-length:");
+    if (pos == std::string::npos)
+        return 0;
+
+    pos += 15;
+    while (pos < resp.size() && (resp[pos] == ' ' || resp[pos] == '\t'))
+        ++pos;
+
+    size_t end = resp.find_first_of("\r\n", pos);
+    if (end == std::string::npos)
+        return 0;
+
+    try
+    {
+        return std::stoi(resp.substr(pos, end - pos));
+    }
+    catch (...)
+    {
+        return 0;
+    }
+}
+
 int rtspParser::parse_status_code(const std::string &resp)
 {
     int code = -1;

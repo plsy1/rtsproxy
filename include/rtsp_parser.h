@@ -31,6 +31,7 @@ public:
     static int parse_status_code(const std::string &resp);
     static int parse_session_id(const std::string &resp, rtspCtx &ctx);
     static int parse_url(const std::string &url, rtspCtx &ctx);
+    static int get_content_length(const std::string &resp);
 
 private:
 };

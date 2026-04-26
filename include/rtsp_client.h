@@ -109,7 +109,7 @@ private:
 
     void send_rtsp_option();
     void send_rtsp_describe();
-    void send_rtsp_setup();
+    void send_rtsp_setup(const std::string &sdp_data = "");
     void send_rtsp_play();
 
     std::string RtspMethodToString(RtspMethod method);
