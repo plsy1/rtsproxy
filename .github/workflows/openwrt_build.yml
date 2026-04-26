@@ -5,6 +5,15 @@ on:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to build for (e.g. v0.2.3 or v0.2.3-r2)'
+        required: true
+        default: 'v1.0.0'
+      revision:
+        description: 'Revision (r1, r2...) - ignored if tag has -r suffix'
+        required: false
+        default: '1'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -76,13 +85,28 @@ jobs:
           # 修复换行符
           find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
 
-          # 同步版本号
+          # 同步版本号和修订号
           if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
-            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/rtsproxy/Makefile
-            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/luci-app-rtsproxy/Makefile
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${{ github.event.inputs.tag_name }}"
           fi
+          
+          # 移除 v 前缀
+          VERSION_FULL="${TAG_NAME#v}"
+          # 提取主版本号 (移除 -rX)
+          VERSION="${VERSION_FULL%-r*}"
+          # 提取修订号
+          REVISION="${VERSION_FULL##*-r}"
+          if [ "$REVISION" = "$VERSION_FULL" ]; then
+            # 如果没有 -r，则使用输入的 revision 或默认为 1
+            REVISION="${{ github.event.inputs.revision || '1' }}"
+          fi
+
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$REVISION/" package/rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$REVISION/" package/luci-app-rtsproxy/Makefile
 
           # 配置并编译
           echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
@@ -95,14 +119,15 @@ jobs:
       - name: Collect artifacts
         run: |
           VERSION=$(grep "^PKG_VERSION:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
+          REVISION=$(grep "^PKG_RELEASE:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
           mkdir -p output
           # 收集本体 (排除调试包)
           for file in $(find sdk/bin/packages/ -name "rtsproxy*.ipk" ! -name "luci-app-rtsproxy*" ! -name "*-dbgsym*"); do
-            cp "$file" "output/rtsproxy_${VERSION}-r1_openwrt-${{ matrix.arch }}.ipk"
+            cp "$file" "output/rtsproxy_${VERSION}-r${REVISION}_openwrt-${{ matrix.arch }}.ipk"
           done
           # 收集 LuCI (排除调试包)
           for file in $(find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" ! -name "*-dbgsym*"); do
-            cp "$file" "output/luci-app-rtsproxy_${VERSION}-r1_all.ipk"
+            cp "$file" "output/luci-app-rtsproxy_${VERSION}-r${REVISION}_all.ipk"
           done
 
       - name: Upload artifacts
@@ -115,7 +140,6 @@ jobs:
     name: Release IPKs
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'release'
     permissions:
       contents: write
     steps:
@@ -131,4 +155,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.event.release.tag_name }} release_ipk/*.ipk
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${{ github.event.inputs.tag_name }}"
+          fi
+          # 尝试获取目标 tag
+          VERSION_TAG="${TAG_NAME%-r*}"
+          
+          # 上传到对应的 release
+          gh release upload "$VERSION_TAG" release_ipk/*.ipk --clobber || \
+          gh release upload "$TAG_NAME" release_ipk/*.ipk --clobber
