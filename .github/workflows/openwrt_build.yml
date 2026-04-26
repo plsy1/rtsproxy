@@ -97,8 +97,10 @@ jobs:
 
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" package/rtsproxy/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" package/rtsproxy/Makefile
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" package/luci-app-rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" package/luci-app-rtsproxy/Makefile
+          
+          # luci.mk 忽略自定义的 PKG_RELEASE，因此我们将修订号直接拼接到 PKG_VERSION 中
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/luci-app-rtsproxy/Makefile
 
           # 配置并编译
           echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
