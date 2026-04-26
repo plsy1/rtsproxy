@@ -110,16 +110,20 @@ jobs:
 
       - name: Collect artifacts
         run: |
-          VERSION=$(grep "^PKG_VERSION:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
-          REVISION=$(grep "^PKG_RELEASE:=" sdk/package/rtsproxy/Makefile | cut -d= -f2)
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+          else
+            TAG_NAME="${{ github.ref_name }}"
+          fi
+          VERSION_FULL="${TAG_NAME#v}"
           mkdir -p output
           # 收集本体 (排除调试包)
           for file in $(find sdk/bin/packages/ -name "rtsproxy*.ipk" ! -name "luci-app-rtsproxy*" ! -name "*-dbgsym*"); do
-            cp "$file" "output/rtsproxy_${VERSION}-r${REVISION}_openwrt-${{ matrix.arch }}.ipk"
+            cp "$file" "output/rtsproxy_${VERSION_FULL}_openwrt-${{ matrix.arch }}.ipk"
           done
           # 收集 LuCI (排除调试包)
           for file in $(find sdk/bin/packages/ -name "luci-app-rtsproxy*.ipk" ! -name "*-dbgsym*"); do
-            cp "$file" "output/luci-app-rtsproxy_${VERSION}-r${REVISION}_all.ipk"
+            cp "$file" "output/luci-app-rtsproxy_${VERSION_FULL}_all.ipk"
           done
 
       - name: Upload artifacts
@@ -152,32 +156,5 @@ jobs:
           else
             TAG_NAME="${{ github.ref_name }}"
           fi
-          
-          # 移除 v 前缀
-          VERSION_FULL="${TAG_NAME#v}"
-          VERSION="${VERSION_FULL%-r*}"
-          
-          # 尝试获取目标 tag (如果 v0.2.3-r2 触发，优先传到 v0.2.3 的 Release)
-          TARGET_TAG="$VERSION"
-          if [[ "$TAG_NAME" == v* ]]; then TARGET_TAG="v$VERSION"; fi
-          
-          # 如果目标 Tag 的 Release 不存在，则使用当前 Tag
-          if ! gh release view "$TARGET_TAG" >/dev/null 2>&1; then
-            TARGET_TAG="$TAG_NAME"
-          fi
-
-          echo "Target Release: $TARGET_TAG"
-
-          # 清理旧版本的同名资产 (例如上传 r2 时删除 r1)
-          EXISTING_ASSETS=$(gh release view "$TARGET_TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
-          for asset in $EXISTING_ASSETS; do
-            if [[ $asset =~ ^rtsproxy_${VERSION}-r[0-9]+_ ]] || [[ $asset =~ ^luci-app-rtsproxy_${VERSION}-r[0-9]+_ ]]; then
-              # 如果文件名不完全一致（即修订号不同），则删除
-              # 这里我们简单点，只要匹配该版本号的旧 rX 文件就删掉，保持 Release 干净
-              echo "Cleaning up old revision asset: $asset"
-              gh release delete-asset "$TARGET_TAG" "$asset" -y || true
-            fi
-          done
-
-          # 上传新资产
-          gh release upload "$TARGET_TAG" release_ipk/*.ipk --clobber
+          # 直接上传到当前 Tag 的 Release
+          gh release upload "$TAG_NAME" release_ipk/*.ipk --clobber

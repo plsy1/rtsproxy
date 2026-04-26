@@ -268,30 +268,7 @@ jobs:
           else
             TAG_NAME="${{ github.ref_name }}"
           fi
-          
-          # 移除 v 前缀
-          VERSION_FULL="${TAG_NAME#v}"
-          VERSION="${VERSION_FULL%-r*}"
-          
-          # 尝试获取目标 tag
-          TARGET_TAG="$VERSION"
-          if [[ "$TAG_NAME" == v* ]]; then TARGET_TAG="v$VERSION"; fi
-          
-          if ! gh release view "$TARGET_TAG" >/dev/null 2>&1; then
-            TARGET_TAG="$TAG_NAME"
-          fi
-
-          echo "Target Release: $TARGET_TAG"
-
-          # 清理旧版本的同名资产 (例如上传 r2 时删除 r1)
-          EXISTING_ASSETS=$(gh release view "$TARGET_TAG" --json assets --jq '.assets[].name' 2>/dev/null || echo "")
-          for asset in $EXISTING_ASSETS; do
-            if [[ $asset =~ ^rtsproxy-${VERSION}-r[0-9]+- ]]; then
-              echo "Cleaning up old revision asset: $asset"
-              gh release delete-asset "$TARGET_TAG" "$asset" -y || true
-            fi
-          done
 
           for i in release/rtsproxy-*; do
-            gh release upload "$TARGET_TAG" "$i" --clobber
+            gh release upload "$TAG_NAME" "$i" --clobber
           done
