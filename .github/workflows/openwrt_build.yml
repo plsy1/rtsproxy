@@ -93,10 +93,11 @@ jobs:
             REVISION="1"
           fi
 
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$REVISION/" package/rtsproxy/Makefile
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION/" package/luci-app-rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$REVISION/" package/luci-app-rtsproxy/Makefile
+          # 使用完整的版本字符串（如 0.2.3-r1）作为 PKG_VERSION
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/luci-app-rtsproxy/Makefile
 
           # 配置并编译
           echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
