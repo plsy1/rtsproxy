@@ -19,7 +19,7 @@
 
 ## 工作模式详解
 
-### 1. HTTP 代理模式 (推荐用于 NAT 环境)
+### 1. HTTP 代理模式
 客户端通过 HTTP 协议请求代理，代理将上游 RTSP 流转换为裸 TS 流通过 HTTP 返回。
 
 - **STUN 支持**：**支持**。通过 `--enable-nat` 开启，适用于代理服务器位于 NAT 后的环境。
@@ -27,7 +27,7 @@
     - `http://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `http://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持规则重写)
 
-### 2. RTSP MITM 模式 (推荐用于内网透明中继)
+### 2. RTSP MITM 模式
 客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
 - **STUN 支持**：**不支持**。适用于代理服务器拥有公网 IP 或与上游服务器在同一内网的环境。
