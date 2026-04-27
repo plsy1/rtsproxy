@@ -103,9 +103,12 @@ Options:
       --http-interface  <iface> 设置 HTTP 模式上游网口
       --mitm-interface  <iface> 设置 MITM 模式上游网口
   -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
-  -d, --daemon                  后台运行
   -w, --watchdog                开启自动重启模式
+  -d, --daemon                  后台运行
   -k, --kill                    杀死正在运行的实例
+      --log-file        <path>  将日志写入指定文件 (留空则输出到标准输出)
+      --log-lines       <count> 设置日志滚动行数 (默认: 10000)
+      --log-level       <level> 设置日志等级: error, warn, info, debug (默认: info)
 ```
 
 > [!TIP]
