@@ -1,0 +1,94 @@
+name: Build Check
+
+on:
+  push:
+    branches: [ "**" ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  native-build:
+    name: Native Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build g++
+
+      - name: Setup and Build
+        run: |
+          meson setup builddir
+          meson compile -C builddir
+
+  openwrt-build:
+    name: OpenWrt Build Check (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils zstd python3-pyelftools
+
+      - name: Cache SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: sdk-23.05-x64-${{ hashFiles('openwrt/rtsproxy/Makefile') }}
+
+      - name: Download and setup SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir sdk
+          wget -q https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          tar xf openwrt-sdk-*.tar.* -C sdk --strip-components=1
+          rm openwrt-sdk-*.tar.*
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Build Package
+        run: |
+          cd sdk
+          rm -rf package/rtsproxy package/luci-app-rtsproxy
+          
+          # 准备本体
+          mkdir -p package/rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/src package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/include package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
+          cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
+          
+          # 准备 LuCI
+          mkdir -p package/luci-app-rtsproxy
+          cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/
+          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
+
+          # 修复换行符
+          find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
+
+          # 配置并编译
+          echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-rtsproxy=y" >> .config
+          make defconfig
+
+          make package/rtsproxy/compile V=s
+          make package/luci-app-rtsproxy/compile V=s
