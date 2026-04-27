@@ -83,24 +83,11 @@ jobs:
             TAG_NAME="${{ github.ref_name }}"
           fi
           
-          # 移除 v 前缀
           VERSION_FULL="${TAG_NAME#v}"
 
-          # 提取版本号和修订号（如 0.2.3-r2 提取为 0.2.3 和 2）
-          if echo "$VERSION_FULL" | grep -q '.*-r[0-9]\+$'; then
-            PKG_VER=$(echo "$VERSION_FULL" | sed 's/-r[0-9]\+$//')
-            PKG_REL=$(echo "$VERSION_FULL" | grep -o 'r[0-9]\+$' | tr -d 'r')
-          else
-            PKG_VER="$VERSION_FULL"
-            PKG_REL="1"
-          fi
-
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" package/rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" package/rtsproxy/Makefile
-          
-          # luci.mk 忽略自定义的 PKG_RELEASE，因此我们将修订号直接拼接到 PKG_VERSION 中
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/rtsproxy/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" package/luci-app-rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" package/luci-app-rtsproxy/Makefile
+
 
           # 配置并编译
           echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
