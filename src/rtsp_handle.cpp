@@ -43,7 +43,7 @@ void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
         std::string(inet_ntoa(client_addr.sin_addr)) + ":" +
         std::to_string(ntohs(client_addr.sin_port));
 
-    Logger::info("[RTSP-MITM] New RTSP client: " + client_host);
+    Logger::debug("[RTSP-MITM] New RTSP client: " + client_host);
 
     auto client = std::make_unique<RTSPMitmClient>(
         loop, pool, client_addr, client_fd, first_request);
@@ -55,7 +55,7 @@ void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
     loop->get_client_from_map(client_fd)->set_on_closed_callback(
         [client_fd, loop, client_host]()
         {
-            Logger::info("[RTSP-MITM] Client disconnect: " + client_host);
+                    Logger::debug("[RTSP-MITM] Client disconnect: " + client_host);
             loop->add_task([client_fd, loop]()
                            { loop->remove_client_from_map(client_fd); });
         });

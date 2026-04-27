@@ -145,6 +145,9 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
     std::cout << "  -w, --watchdog                Run in watchdog mode (auto-restart on crash)" << std::endl;
+    std::cout << "      --log-file        <path>  Write logs to a specific file instead of stdout" << std::endl;
+    std::cout << "      --log-lines       <count> Set maximum log file lines (default: 10000)" << std::endl;
+    std::cout << "      --log-level       <level> Set log level: error, warn, info, debug (default: info)" << std::endl;
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
     std::cout << "      --set-stun-host,  <port>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
     std::cout << "      --set-stun-port,  <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;

@@ -213,7 +213,7 @@ bool httpParser::parse_tv_url(const std::string &url, std::string &rtsp_url)
         rtsp_url = replaced_url.substr(4);
         rtsp_url = "rtsp://" + rtsp_url;
 
-        Logger::info("[SERVER] Playback address rewritten to: " + rtsp_url);
+        Logger::debug("[SERVER] Playback address rewritten to: " + rtsp_url);
         return true;
     }
 }

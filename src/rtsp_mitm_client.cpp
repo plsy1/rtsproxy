@@ -138,7 +138,7 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
                     proxy_uri_prefix_ = uri.substr(0, path_pos);
                     upstream_uri_base_ = "rtsp://" + real_ctx.server_ip + ":" + std::to_string(real_ctx.server_rtsp_port);
                     ctx_ = real_ctx;
-                    Logger::info("[MITM] Prefixed URL detected. Upstream: " + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port) + ctx_.path);
+                    Logger::debug("[MITM] Prefixed URL detected. Upstream: " + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port) + ctx_.path);
                 }
             }
         }
@@ -174,7 +174,7 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
                     ctx_.path             = real_path;
                     ctx_.rtsp_url         = upstream_uri_base_ + real_path;
 
-                    Logger::info("[MITM] Proxy-path URL detected. Upstream: " +
+                    Logger::debug("[MITM] Proxy-path URL detected. Upstream: " +
                                  ctx_.server_ip + ":" +
                                  std::to_string(ctx_.server_rtsp_port) +
                                  ctx_.path);
@@ -329,7 +329,7 @@ bool RTSPMitmClient::init_relay_sockets()
     optimize(rtp_us_fd_); optimize(rtcp_us_fd_);
     optimize(rtp_ds_fd_); optimize(rtcp_ds_fd_);
 
-    Logger::info("[MITM] Relay ports: US=" + std::to_string(local_rtp_us_port_) + 
+    Logger::debug("[MITM] Relay ports: US=" + std::to_string(local_rtp_us_port_) + 
                  ", DS=" + std::to_string(local_rtp_ds_port_));
     return true;
 }
@@ -602,7 +602,7 @@ void RTSPMitmClient::handle_upstream(uint32_t events)
         on_upstream_readable();
     if (events & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
     {
-        Logger::info("[MITM] Upstream connection closed");
+        Logger::debug("[MITM] Upstream connection closed");
         close_all();
     }
 }
@@ -843,7 +843,7 @@ void RTSPMitmClient::on_downstream_readable()
             if (extract_interleaved_channels(req, ds_interleaved_rtp_, ds_interleaved_rtcp_))
             {
                 is_downstream_tcp_ = true;
-                Logger::info("[MITM] Downstream using TCP interleaved: " +
+                Logger::debug("[MITM] Downstream using TCP interleaved: " +
                              std::to_string(ds_interleaved_rtp_) + "-" +
                              std::to_string(ds_interleaved_rtcp_));
             }
@@ -862,7 +862,7 @@ void RTSPMitmClient::on_downstream_readable()
                     client_rtcp_addr_.sin_port = htons(crtcp);
                     client_rtcp_addr_.sin_addr = client_addr_.sin_addr;
 
-                    Logger::info("[MITM] Client RTP ports: " +
+                    Logger::debug("[MITM] Client RTP ports: " +
                                  std::to_string(crtp) + "-" + std::to_string(crtcp));
                 }
             }
@@ -936,7 +936,7 @@ void RTSPMitmClient::on_downstream_writable()
 
 void RTSPMitmClient::on_downstream_closed()
 {
-    Logger::info("[MITM] Downstream client disconnected");
+    Logger::debug("[MITM] Downstream client disconnected");
     close_all();
 }
 
@@ -953,7 +953,7 @@ void RTSPMitmClient::on_upstream_writable()
             close_all();
             return;
         }
-        Logger::info("[MITM] Connected to upstream " + ctx_.server_ip +
+        Logger::debug("[MITM] Connected to upstream " + ctx_.server_ip +
                      ":" + std::to_string(ctx_.server_rtsp_port));
         state_ = State::IDLE;
 
@@ -1017,7 +1017,7 @@ void RTSPMitmClient::on_upstream_readable()
     {
         if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
         {
-            Logger::info("[MITM] Upstream closed connection");
+            Logger::debug("[MITM] Upstream closed connection");
             close_all();
         }
         return;
@@ -1098,7 +1098,7 @@ void RTSPMitmClient::on_upstream_readable()
             if (extract_interleaved_channels(resp, us_interleaved_rtp_, us_interleaved_rtcp_))
             {
                 is_upstream_tcp_ = true;
-                Logger::info("[MITM] Upstream confirmed TCP interleaved: " +
+                Logger::debug("[MITM] Upstream confirmed TCP interleaved: " +
                              std::to_string(us_interleaved_rtp_) + "-" +
                              std::to_string(us_interleaved_rtcp_));
             }
@@ -1114,7 +1114,7 @@ void RTSPMitmClient::on_upstream_readable()
             if (state_ != State::STREAMING)
             {
                 state_ = State::STREAMING;
-                Logger::info("[MITM] Streaming started: " + ctx_.rtsp_url +
+                Logger::debug("[MITM] Streaming started: " + ctx_.rtsp_url +
                              " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) +
                              ":" + std::to_string(ntohs(client_addr_.sin_port)));
                 init_timer_fd();

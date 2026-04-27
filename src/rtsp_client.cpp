@@ -162,7 +162,7 @@ void RTSPClient::on_rtsp_writable()
             on_closed_callback_();
             return;
         }
-        Logger::info("[RTSP] Connection to upstream established.");
+        Logger::debug("[RTSP] Connection to upstream established.");
         state_ = RtspState::CONNECTED;
     }
 
@@ -262,14 +262,14 @@ void RTSPClient::on_rtsp_readable()
                         is_tcp_mode_ = true;
                         interleaved_rtp_channel_ = static_cast<uint8_t>(ctx.server_rtp_port);
                         interleaved_rtcp_channel_ = static_cast<uint8_t>(ctx.server_rtcp_port);
-                        Logger::info("[RTSP] SETUP done (TCP Interleaved), Channels: " +
+                        Logger::debug("[RTSP] SETUP done (TCP Interleaved), Channels: " +
                                      std::to_string(interleaved_rtp_channel_) + "-" +
                                      std::to_string(interleaved_rtcp_channel_));
                     }
                     else
                     {
                         is_tcp_mode_ = false;
-                        Logger::info(std::string("[RTSP] SETUP done (UDP), server port: " +
+                        Logger::debug(std::string("[RTSP] SETUP done (UDP), server port: " +
                                                  std::to_string(ctx.server_rtp_port) + "-" +
                                                  std::to_string(ctx.server_rtcp_port)));
                         init_rtp_rtcp_server_addr();
@@ -279,7 +279,7 @@ void RTSPClient::on_rtsp_readable()
                 }
                 else if (current_request_.method == RtspMethod::PLAY)
                 {
-                    Logger::info(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
+                    Logger::debug(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
                     init_timer_fd();
                     state_ = RtspState::STREAMING;
                 }
@@ -287,7 +287,7 @@ void RTSPClient::on_rtsp_readable()
         }
         else if (n == 0)
         {
-            Logger::info("[RTSP] Server closed connection");
+            Logger::debug("[RTSP] Server closed connection");
             on_closed_callback_();
             return;
         }
@@ -331,7 +331,7 @@ void RTSPClient::on_rtp_readable()
         {
             if (StunClient::extract_stun_mapping_from_response(buf.get(), recv_len, nat_wan_ip, nat_wan_port) == 0)
             {
-                Logger::info("[RTP] Extract STUN mapping success: " + nat_wan_ip + ":" + std::to_string(nat_wan_port));
+                Logger::debug("[RTP] Extract STUN mapping success: " + nat_wan_ip + ":" + std::to_string(nat_wan_port));
             };
             loop->set(rtp_ctx_.get(), rtp_fd_, EPOLLIN);
         }
@@ -659,13 +659,13 @@ void RTSPClient::send_rtsp_setup(const std::string &sdp_data)
     if (setup_retry_with_tcp_)
     {
         header = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n";
-        Logger::info("[RTSP] SETUP with TCP Interleaved mode");
+        Logger::debug("[RTSP] SETUP with TCP Interleaved mode");
     }
     else
     {
         header = "Transport: RTP/AVP;unicast;client_port=" +
                  std::to_string(port1) + "-" + std::to_string(port2) + "\r\n";
-        Logger::info("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
+        Logger::debug("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
     }
 
     std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path + "/" + track;

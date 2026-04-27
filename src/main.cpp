@@ -33,13 +33,24 @@ void supervisor_sig_handler(int sig)
     {
         kill(worker_pid, sig);
     }
+    Logger::flush();
+    _exit(0);
+}
+
+void worker_sig_handler(int sig)
+{
+    // Note: Logger::info might not be 100% async-signal-safe, 
+    // but we use a mutex inside so it's generally okay for exit paths.
+    Logger::flush();
     _exit(0);
 }
 
 int main(int argc, char *argv[])
 {
 
-    Logger::setLogLevel(LogLevel::ERROR);
+    Logger::setLogLevel(LogLevel::INFO);
+    signal(SIGINT, worker_sig_handler);
+    signal(SIGTERM, worker_sig_handler);
 
     struct option long_options[] =
         {
@@ -57,11 +68,16 @@ int main(int argc, char *argv[])
             {"kill", no_argument, nullptr, 'k'},
             {"daemon", no_argument, nullptr, 'd'},
             {"watchdog", no_argument, nullptr, 'w'},
+            {"log-file", required_argument, nullptr, 0},
+            {"log-lines", required_argument, nullptr, 0},
+            {"log-level", required_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
     int longindex = -1;
     bool use_watchdog = false;
+    std::string log_file_path;
+    size_t log_file_lines = 10000; // 10000 lines default
     while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:l:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
@@ -118,6 +134,22 @@ int main(int argc, char *argv[])
             {
                 ServerConfig::setMitmUpstreamInterface(optarg);
             }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-file") == 0)
+            {
+                log_file_path = optarg;
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-lines") == 0)
+            {
+                log_file_lines = std::stoull(optarg);
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-level") == 0)
+            {
+                std::string level = optarg;
+                if (level == "error") Logger::setLogLevel(LogLevel::ERROR);
+                else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
+                else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
+                else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
+            }
             break;
         default:
             ServerConfig::printUsage(argv[0]);
@@ -125,9 +157,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (!log_file_path.empty()) {
+        Logger::setLogFile(log_file_path, log_file_lines);
+    }
+
     if (use_watchdog)
     {
         Logger::info("[SUPERVISOR] Starting in watchdog mode");
+        Logger::flush();
         signal(SIGTERM, supervisor_sig_handler);
         signal(SIGINT, supervisor_sig_handler);
 
@@ -141,9 +178,9 @@ int main(int argc, char *argv[])
                 signal(SIGABRT, crash_handler);
                 signal(SIGFPE, crash_handler);
                 signal(SIGILL, crash_handler);
-                // Reset supervisor signals to default in worker
-                signal(SIGTERM, SIG_DFL);
-                signal(SIGINT, SIG_DFL);
+                // Ensure worker flushes logs on signal
+                signal(SIGTERM, worker_sig_handler);
+                signal(SIGINT, worker_sig_handler);
                 break; // Exit supervisor loop and continue to main logic
             }
             else if (worker_pid > 0)
@@ -157,6 +194,7 @@ int main(int argc, char *argv[])
                     if (exit_code == 0)
                     {
                         Logger::info("[SUPERVISOR] Worker exited normally. Shutting down.");
+                        Logger::flush();
                         return 0;
                     }
                     else
