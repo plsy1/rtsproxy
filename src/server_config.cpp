@@ -8,6 +8,7 @@
 
 int ServerConfig::port = 8554;
 bool ServerConfig::enable_nat = false;
+std::string ServerConfig::nat_method = "stun";
 int ServerConfig::rtp_buffer_size = 8192;
 int ServerConfig::udp_packet_size = 1500;
 int ServerConfig::stun_server_port = 19302;
@@ -27,6 +28,13 @@ void ServerConfig::enableNat()
 {
     enable_nat = true;
     Logger::info("[CONFIG] NAT traversal enabled");
+}
+
+void ServerConfig::setNatMethod(const std::string &method)
+{
+    nat_method = method;
+    enable_nat = true;
+    Logger::info("[CONFIG] NAT method set to: " + method);
 }
 
 void ServerConfig::setRtpBufferSize(int size)
@@ -85,6 +93,11 @@ bool ServerConfig::isNatEnabled()
     return enable_nat;
 }
 
+std::string ServerConfig::getNatMethod()
+{
+    return nat_method;
+}
+
 int ServerConfig::getRtpBufferSize()
 {
     return rtp_buffer_size;
@@ -136,6 +149,7 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "Options:" << std::endl;
     std::cout << "  -p, --port            <port>  Set HTTP server port (default: " << port << ")" << std::endl;
     std::cout << "  -n, --enable-nat              Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
+    std::cout << "      --nat-method      <method> Set NAT method: stun, zte (default: " << nat_method << ")" << std::endl;
     std::cout << "  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
     std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;

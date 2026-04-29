@@ -11,6 +11,7 @@ public:
     static void setUdpPacketSize(int size);
     static void setStunPort(int port);
     static void setStunHost(std::string host);
+    static void setNatMethod(const std::string &method);
     static void setJsonPath(std::string path);
     static void setToken(std::string token);
     static void setHttpUpstreamInterface(std::string iface);
@@ -18,6 +19,7 @@ public:
     static void setListenInterface(std::string iface);
 
     static bool isNatEnabled();
+    static std::string getNatMethod();
     static int getPort();
     static int getRtpBufferSize();
     static int getUdpPacketSize();
@@ -35,6 +37,7 @@ public:
 private:
     static int port;
     static bool enable_nat;
+    static std::string nat_method;
     static int rtp_buffer_size;
     static int udp_packet_size;
     static int stun_server_port;

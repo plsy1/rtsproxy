@@ -88,6 +88,7 @@ private:
     void push_request_into_queue(RtspMethod method, const std::string &uri, const std::string &extra_headers = "", const std::string &body = "");
     void build_and_send_request();
     void send_rtp_trigger();
+    void send_zte_heartbeat();
     void send_http_response();
     bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
 
@@ -152,6 +153,8 @@ private:
     RtspState state_ = RtspState::DISCONNECTED;
 
     std::string nat_wan_ip;
+    std::string local_ip_;
+    uint16_t local_tcp_port_ = 0;
     std::string req_buf_;
     std::string resp_buf_;
     char rtsp_buf[8192];

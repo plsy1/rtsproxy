@@ -40,7 +40,7 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
 
     send_http_response();
     init_rtp_rtcp_sockets();
-    if (ServerConfig::isNatEnabled() == true)
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "stun")
     {
         StunClient::send_stun_mapping_request(rtp_fd_);
     }
@@ -147,6 +147,11 @@ void RTSPClient::handle_timer(uint32_t event)
         read(timer_fd_, &expirations, sizeof(expirations));
         push_request_into_queue(RtspMethod::GET_PARAMETER, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path);
         build_and_send_request();
+
+        if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+        {
+            send_zte_heartbeat();
+        }
     }
 }
 
@@ -164,6 +169,14 @@ void RTSPClient::on_rtsp_writable()
         }
         Logger::debug("[RTSP] Connection to upstream established.");
         state_ = RtspState::CONNECTED;
+
+        struct sockaddr_in local_addr;
+        socklen_t addr_len = sizeof(local_addr);
+        if (getsockname(rtsp_fd_, (struct sockaddr *)&local_addr, &addr_len) == 0) {
+            local_ip_ = inet_ntoa(local_addr.sin_addr);
+            local_tcp_port_ = ntohs(local_addr.sin_port);
+            Logger::debug("[RTSP] Local IP: " + local_ip_ + ", Local TCP Port: " + std::to_string(local_tcp_port_));
+        }
     }
 
     ssize_t n = send(rtsp_fd_, req_buf_.data() + tcp_send_offset_,
@@ -273,7 +286,14 @@ void RTSPClient::on_rtsp_readable()
                                                  std::to_string(ctx.server_rtp_port) + "-" +
                                                  std::to_string(ctx.server_rtcp_port)));
                         init_rtp_rtcp_server_addr();
-                        send_rtp_trigger();
+                        if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+                        {
+                            send_zte_heartbeat();
+                        }
+                        else
+                        {
+                            send_rtp_trigger();
+                        }
                     }
                     send_rtsp_play();
                 }
@@ -503,6 +523,41 @@ void RTSPClient::send_rtp_trigger()
     }
 }
 
+void RTSPClient::send_zte_heartbeat()
+{
+    uint8_t payload[84];
+    memset(payload, 0, sizeof(payload));
+    memcpy(payload, "ZXV10STB", 8);
+    payload[8] = 0x7f;
+    payload[9] = 0xff;
+    payload[10] = 0xff;
+    payload[11] = 0xff;
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, local_ip_.c_str(), &addr) == 1) {
+        memcpy(payload + 12, &addr.s_addr, 4);
+    }
+
+    uint16_t udp_port = rtp_port_;
+    uint16_t tcp_port = local_tcp_port_;
+
+    payload[16] = (udp_port >> 8) & 0xFF;
+    payload[17] = udp_port & 0xFF;
+    payload[18] = (tcp_port >> 8) & 0xFF;
+    payload[19] = tcp_port & 0xFF;
+
+    ssize_t n = sendto(rtp_fd_, payload, sizeof(payload), 0,
+                       (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+    if (n < 0)
+    {
+        Logger::error("[RTP] ZTE heartbeat send failed");
+    }
+    else
+    {
+        Logger::debug("[RTP] ZTE heartbeat sent to " + ctx.server_ip + ":" + std::to_string(ctx.server_rtp_port));
+    }
+}
+
 void RTSPClient::init_timer_fd()
 {
     using namespace std::chrono;
@@ -622,7 +677,14 @@ void RTSPClient::send_rtsp_option()
 
 void RTSPClient::send_rtsp_describe()
 {
-    push_request_into_queue(RtspMethod::DESCRIBE, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path, "Accept: application/sdp\r\n", "");
+    std::string headers = "Accept: application/sdp\r\n";
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
+        headers += "User-Agent: HMTL RTSP 1.0; CTC/2.0\r\n";
+        headers += "x-NAT: " + local_ip_ + ":" + std::to_string(local_tcp_port_) + "\r\n";
+        headers += "Timeshift: 1\r\n";
+        headers += "x-BurstSize: 1048576\r\n";
+    }
+    push_request_into_queue(RtspMethod::DESCRIBE, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path, headers, "");
     build_and_send_request();
 }
 
@@ -661,6 +723,15 @@ void RTSPClient::send_rtsp_setup(const std::string &sdp_data)
         header = "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n";
         Logger::debug("[RTSP] SETUP with TCP Interleaved mode");
     }
+    else if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+    {
+        header = "Transport: MP2T/RTP/UDP;unicast;client_address=" + local_ip_ +
+                 ";client_port=" + std::to_string(port1) + "-" + std::to_string(port2) +
+                 ";mode=PLAY\r\n";
+        header += "User-Agent: HMTL RTSP 1.0; CTC/2.0\r\n";
+        header += "x-NAT: " + local_ip_ + ":" + std::to_string(local_tcp_port_) + "\r\n";
+        Logger::debug("[RTSP] ZTE SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
+    }
     else
     {
         header = "Transport: RTP/AVP;unicast;client_port=" +
@@ -677,6 +748,12 @@ void RTSPClient::send_rtsp_setup(const std::string &sdp_data)
 void RTSPClient::send_rtsp_play()
 {
     std::string header = "Range: npt=0.000-\r\n";
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
+        header = "Range: clock=end-\r\n";
+        header += "User-Agent: HMTL RTSP 1.0; CTC/2.0\r\n";
+        header += "x-BurstSize: 1048576\r\n";
+        header += "Scale: 1.0\r\n";
+    }
     std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
     push_request_into_queue(RtspMethod::PLAY, url, header);
     build_and_send_request();

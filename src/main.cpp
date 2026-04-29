@@ -56,6 +56,7 @@ int main(int argc, char *argv[])
         {
             {"port", required_argument, nullptr, 'p'},
             {"enable-nat", no_argument, nullptr, 'n'},
+            {"nat-method", required_argument, nullptr, 0},
             {"set-rtp-buffer-size", required_argument, nullptr, 'r'},
             {"set-max-udp-packet-size", required_argument, nullptr, 'u'},
             {"set-auth-token", required_argument, nullptr, 't'},
@@ -118,7 +119,11 @@ int main(int argc, char *argv[])
             use_watchdog = true;
             break;
         case 0:
-            if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
+            if (longindex >= 0 && strcmp(long_options[longindex].name, "nat-method") == 0)
+            {
+                ServerConfig::setNatMethod(optarg);
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
             {
                 ServerConfig::setStunPort(std::atoi(optarg));
             }
