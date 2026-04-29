@@ -43,6 +43,7 @@ private:
     {
         WAIT_UPSTREAM_CONNECT, // TCP connect to upstream in progress
         IDLE,                  // Connected, waiting for next client request
+        WAIT_STUN,             // Waiting for STUN mapping response
         WAIT_UPSTREAM_RESP,    // Forwarded a request, waiting for response
         STREAMING,             // PLAY done, forwarding RTP
     };
@@ -137,6 +138,7 @@ private:
     void on_upstream_writable();
     void send_rtp_trigger();
     void send_zte_heartbeat();
+    void process_pending_setup();
 
     void close_all();
 
@@ -222,6 +224,8 @@ private:
     std::string local_ip_;
     uint16_t local_tcp_port_{0};
     std::string ds_transport_protocol_;
+    uint16_t nat_wan_port_us_{0};
+    std::string pending_setup_req_;
 
     // High-speed relay buffer (64KB) to prevent truncation and allow immediate forwarding
     uint8_t rtp_relay_buf_[65536];

@@ -8,6 +8,7 @@
 #include "../include/common/rtsp_ctx.h"
 #include "../include/rtsp_parser.h"
 #include "../include/socket_helper.h"
+#include "../include/stun_client.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -503,6 +504,15 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
         return replace_header(req, "Transport", new_transport);
     }
 
+    uint16_t rtp_port = local_rtp_us_port_;
+    uint16_t rtcp_port = local_rtcp_us_port_;
+
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "stun" && nat_wan_port_us_ != 0)
+    {
+        rtp_port = nat_wan_port_us_;
+        rtcp_port = nat_wan_port_us_ + 1;
+    }
+
     std::regex re(R"(client_port=\d+-\d+)");
     std::string new_transport = transport;
 
@@ -517,15 +527,15 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
         new_transport = std::regex_replace(new_transport, int_re, "");
         if (new_transport.back() == ';') new_transport.pop_back();
 
-        new_transport += ";client_port=" + std::to_string(local_rtp_us_port_) + "-" +
-                         std::to_string(local_rtcp_us_port_);
+        new_transport += ";client_port=" + std::to_string(rtp_port) + "-" +
+                         std::to_string(rtcp_port);
     }
     else
     {
         new_transport = std::regex_replace(
             transport, re,
-            "client_port=" + std::to_string(local_rtp_us_port_) + "-" +
-                std::to_string(local_rtcp_us_port_));
+            "client_port=" + std::to_string(rtp_port) + "-" +
+                std::to_string(rtcp_port));
     }
 
     return replace_header(req, "Transport", new_transport);
@@ -639,6 +649,33 @@ void RTSPMitmClient::handle_upstream(uint32_t events)
 
 void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
 {
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "stun" && state_ == State::WAIT_STUN)
+    {
+        sockaddr_in src{};
+        socklen_t slen = sizeof(src);
+        ssize_t n = recvfrom(rtp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+                             (sockaddr *)&src, &slen);
+        if (n > 0)
+        {
+            std::string wan_ip;
+            uint16_t wan_port = 0;
+            if (StunClient::extract_stun_mapping_from_response(rtp_relay_buf_, n, wan_ip, wan_port) == 0)
+            {
+                nat_wan_port_us_ = wan_port;
+                Logger::debug("[MITM] STUN mapped public port for RTP: " + std::to_string(nat_wan_port_us_));
+            }
+            else
+            {
+                Logger::warn("[MITM] Failed to parse STUN response for RTP, fallback to local port");
+                nat_wan_port_us_ = local_rtp_us_port_;
+            }
+            
+            state_ = State::IDLE;
+            process_pending_setup();
+        }
+        return;
+    }
+
     while (true)
     {
         sockaddr_in src{};
@@ -910,6 +947,15 @@ void RTSPMitmClient::on_downstream_readable()
                     return;
                 }
                 relay_ready_ = true;
+            }
+
+            if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "stun")
+            {
+                StunClient::send_stun_mapping_request(rtp_us_fd_);
+                state_ = State::WAIT_STUN;
+                pending_setup_req_ = req;
+                Logger::debug("[MITM] Pausing SETUP for STUN mapping...");
+                break;
             }
 
             last_setup_req_ = req; // Store for potential TCP fallback
@@ -1286,4 +1332,17 @@ void RTSPMitmClient::send_zte_heartbeat()
     {
         Logger::debug("[MITM] ZTE heartbeat sent to " + ctx_.server_ip + ":" + std::to_string(ntohs(server_rtp_addr_.sin_port)));
     }
+}
+
+void RTSPMitmClient::process_pending_setup()
+{
+    std::string req = pending_setup_req_;
+    pending_setup_req_.clear();
+
+    last_setup_req_ = req;
+    req = patch_transport_for_upstream(req);
+    req = rewrite_request_for_upstream(req);
+
+    to_upstream_q_.push_back(req);
+    loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
 }
