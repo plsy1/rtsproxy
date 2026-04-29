@@ -148,10 +148,10 @@ void RTSPClient::handle_timer(uint32_t event)
         push_request_into_queue(RtspMethod::GET_PARAMETER, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path);
         build_and_send_request();
 
-        if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
-        {
-            send_zte_heartbeat();
-        }
+        // if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+        // {
+        //     send_zte_heartbeat();
+        // }
     }
 }
 

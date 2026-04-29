@@ -377,13 +377,16 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
             server_rtcp_addr_.sin_port = htons(srv_rtcp);
             inet_pton(AF_INET, ctx_.server_ip.c_str(), &server_rtcp_addr_.sin_addr);
             
-            if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+            if (!is_upstream_tcp_)
             {
-                send_zte_heartbeat();
-            }
-            else
-            {
-                send_rtp_trigger();
+                if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+                {
+                    send_zte_heartbeat();
+                }
+                else
+                {
+                    send_rtp_trigger();
+                }
             }
         }
 
@@ -857,10 +860,10 @@ void RTSPMitmClient::handle_timer(uint32_t /*events*/)
     to_upstream_q_.push_back(ka);
     loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
 
-    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
-    {
-        send_zte_heartbeat();
-    }
+    // if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+    // {
+    //     send_zte_heartbeat();
+    // }
 }
 
 /* ========================================================================= */
