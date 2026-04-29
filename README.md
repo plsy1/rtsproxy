@@ -9,8 +9,8 @@
 - **统一端口**：HTTP 代理与 RTSP MITM 代理共用端口，自动识别协议。
 - **URL 重写**：支持通过正则规则重写上游地址，支持 `/rtp` 和 `/tv` 路径。
 - **多模式支持**：
-    1. **HTTP 代理模式** (支持 STUN 打洞)
-    2. **RTSP MITM 模式** (高性能透明中继)
+    1. **HTTP 代理模式**
+    2. **RTSP MITM 模式**
 - **协议自适应**：
     - **下游自适应**：根据客户端 SETUP 请求自动选择 UDP 或 TCP (Interleaved) 回传。
     - **上游故障回退**：向上游拉流优先尝试 UDP，若失败（如 461 错误）自动无感回退至 TCP。
@@ -22,7 +22,6 @@
 ### 1. HTTP 代理模式
 客户端通过 HTTP 协议请求代理，代理将上游 RTSP 流转换为裸 TS 流通过 HTTP 返回。
 
-- **STUN 支持**：**支持**。通过 `--enable-nat` 开启，适用于代理服务器位于 NAT 后的环境。
 - **访问格式**：
     - `http://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `http://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持规则重写)
@@ -30,8 +29,6 @@
 ### 2. RTSP MITM 模式
 客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
-- **STUN 支持**：**不支持**。适用于代理服务器拥有公网 IP 或与上游服务器在同一内网的环境。
-- **接口绑定**：**支持**。现在可以安全地绑定到上游网口（如 IPTV 专网），且数据依然能正确回传给局域网客户端（通过套接字分离技术）。
 - **访问格式**：
     - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
     - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
