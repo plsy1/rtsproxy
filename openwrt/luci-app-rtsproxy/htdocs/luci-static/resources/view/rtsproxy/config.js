@@ -12,6 +12,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'rtsproxy', _('General Settings'));
 		s.tab('basic', _('Basic Settings'));
+		s.tab('nat', _('NAT Settings'));
 		s.tab('logging', _('Logging Settings'));
 
 		o = s.taboption('basic', form.Flag, 'enabled', _('Enable'));
@@ -21,7 +22,13 @@ return view.extend({
 		o.datatype = 'port';
 		o.placeholder = '8554';
 
-		o = s.taboption('basic', form.Flag, 'enable_nat', _('Enable NAT'), _('Enable NAT traversal (HTTP mode only)'));
+		o = s.taboption('nat', form.Flag, 'enable_nat', _('Enable NAT'), _('Enable NAT traversal'));
+
+		o = s.taboption('nat', form.ListValue, 'nat_method', _('NAT Method'), _('Select NAT traversal method (default: stun)'));
+		o.value('stun', _('STUN Mode'));
+		o.value('zte', _('ZTE STB Hole Punching'));
+		o.default = 'stun';
+		o.depends('enable_nat', '1');
 
 		o = s.taboption('basic', form.Value, 'rtp_buffer_size', _('RTP Buffer Size'), _('Number of packets in RTP buffer (default: 8192)'));
 		o.datatype = 'uinteger';

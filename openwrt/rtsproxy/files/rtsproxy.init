@@ -21,6 +21,7 @@ start_service() {
 	local log_file
 	local log_lines
 	local log_level
+	local nat_method
 
 	config_load "$CONF"
 	config_get_bool enabled "main" "enabled" 0
@@ -28,6 +29,7 @@ start_service() {
 
 	config_get port "main" "port" "8554"
 	config_get_bool enable_nat "main" "enable_nat" 0
+	config_get nat_method "main" "nat_method" "stun"
 	config_get rtp_buffer_size "main" "rtp_buffer_size" "8192"
 	config_get udp_packet_size "main" "udp_packet_size" "1500"
 	config_get auth_token "main" "auth_token" ""
@@ -48,6 +50,7 @@ start_service() {
 	procd_append_param command -j "$json_path"
 	
 	[ "$enable_nat" -eq 1 ] && procd_append_param command -n
+	[ "$enable_nat" -eq 1 ] && procd_append_param command --nat-method "$nat_method"
 	[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
 	[ -n "$http_interface" ] && procd_append_param command --http-interface "$http_interface"
 	[ -n "$mitm_interface" ] && procd_append_param command --mitm-interface "$mitm_interface"
