@@ -355,6 +355,13 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
     {
         Logger::debug("[MITM] Original Transport: " + transport);
 
+        if (!ds_transport_protocol_.empty()) {
+            size_t pos = transport.find("MP2T/RTP/UDP");
+            if (pos != std::string::npos) {
+                transport.replace(pos, 12, ds_transport_protocol_);
+            }
+        }
+
         // Parse server_port from upstream response and remember it.
         std::regex sp_re(R"(server_port=(\d+)-(\d+))");
         std::smatch sm;
@@ -369,7 +376,14 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
             server_rtcp_addr_.sin_port = htons(srv_rtcp);
             inet_pton(AF_INET, ctx_.server_ip.c_str(), &server_rtcp_addr_.sin_addr);
             
-            send_rtp_trigger();
+            if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+            {
+                send_zte_heartbeat();
+            }
+            else
+            {
+                send_rtp_trigger();
+            }
         }
 
         // Rewrite client_port back to original client ports.
@@ -472,6 +486,22 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
     std::string transport = extract_header_value(req, "Transport");
     if (transport.empty())
         return req;
+
+    if (transport.find("MP2T/RTP/UDP") != std::string::npos) {
+        ds_transport_protocol_ = "MP2T/RTP/UDP";
+    } else if (transport.find("RTP/AVP/TCP") != std::string::npos) {
+        ds_transport_protocol_ = "RTP/AVP/TCP";
+    } else {
+        ds_transport_protocol_ = "RTP/AVP";
+    }
+
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+    {
+        std::string new_transport = "MP2T/RTP/UDP;unicast;client_address=" + local_ip_ +
+                                    ";client_port=" + std::to_string(local_rtp_us_port_) + "-" +
+                                    std::to_string(local_rtcp_us_port_) + ";mode=PLAY";
+        return replace_header(req, "Transport", new_transport);
+    }
 
     std::regex re(R"(client_port=\d+-\d+)");
     std::string new_transport = transport;
@@ -789,6 +819,11 @@ void RTSPMitmClient::handle_timer(uint32_t /*events*/)
                      "\r\n";
     to_upstream_q_.push_back(ka);
     loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+
+    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte")
+    {
+        send_zte_heartbeat();
+    }
 }
 
 /* ========================================================================= */
@@ -957,6 +992,14 @@ void RTSPMitmClient::on_upstream_writable()
                      ":" + std::to_string(ctx_.server_rtsp_port));
         state_ = State::IDLE;
 
+        struct sockaddr_in local_addr;
+        socklen_t addr_len = sizeof(local_addr);
+        if (getsockname(upstream_fd_, (struct sockaddr *)&local_addr, &addr_len) == 0) {
+            local_ip_ = inet_ntoa(local_addr.sin_addr);
+            local_tcp_port_ = ntohs(local_addr.sin_port);
+            Logger::debug("[MITM] Local IP (facing upstream): " + local_ip_ + ", Local TCP Port: " + std::to_string(local_tcp_port_));
+        }
+
         // Now that we are connected, forward the first request that was
         // stashed in downstream_recv_buf_.
         if (!downstream_recv_buf_.empty())
@@ -1120,7 +1163,11 @@ void RTSPMitmClient::on_upstream_readable()
                 init_timer_fd();
                 
                 if (!is_upstream_tcp_) {
-                    send_rtp_trigger();
+                    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
+                        send_zte_heartbeat();
+                    } else {
+                        send_rtp_trigger();
+                    }
                 }
             }
         }
@@ -1201,4 +1248,42 @@ void RTSPMitmClient::send_rtp_trigger()
         sendto(rtcp_us_fd_, &dummy, 1, 0, (struct sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
     }
     Logger::debug("[MITM] Sent RTP/RTCP trigger packets to upstream");
+}
+
+void RTSPMitmClient::send_zte_heartbeat()
+{
+    if (!(ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte"))
+        return;
+
+    uint8_t payload[84];
+    memset(payload, 0, sizeof(payload));
+    memcpy(payload, "ZXV10STB", 8);
+    payload[8] = 0x7f;
+    payload[9] = 0xff;
+    payload[10] = 0xff;
+    payload[11] = 0xff;
+
+    struct in_addr addr;
+    if (inet_pton(AF_INET, local_ip_.c_str(), &addr) == 1) {
+        memcpy(payload + 12, &addr.s_addr, 4);
+    }
+
+    uint16_t udp_port = local_rtp_us_port_;
+    uint16_t tcp_port = local_tcp_port_;
+
+    payload[16] = (udp_port >> 8) & 0xFF;
+    payload[17] = udp_port & 0xFF;
+    payload[18] = (tcp_port >> 8) & 0xFF;
+    payload[19] = tcp_port & 0xFF;
+
+    ssize_t n = sendto(rtp_us_fd_, payload, sizeof(payload), 0,
+                       (struct sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+    if (n < 0)
+    {
+        Logger::error("[MITM] ZTE heartbeat send failed");
+    }
+    else
+    {
+        Logger::debug("[MITM] ZTE heartbeat sent to " + ctx_.server_ip + ":" + std::to_string(ntohs(server_rtp_addr_.sin_port)));
+    }
 }

@@ -136,6 +136,7 @@ private:
     void on_upstream_readable();
     void on_upstream_writable();
     void send_rtp_trigger();
+    void send_zte_heartbeat();
 
     void close_all();
 
@@ -218,6 +219,9 @@ private:
     // replace so every forwarded request uses the real upstream URI.
     std::string proxy_uri_prefix_;   // e.g. "rtsp://10.1.0.6:8555/112.245.125.44:1554"
     std::string upstream_uri_base_;  // e.g. "rtsp://112.245.125.44:1554"
+    std::string local_ip_;
+    uint16_t local_tcp_port_{0};
+    std::string ds_transport_protocol_;
 
     // High-speed relay buffer (64KB) to prevent truncation and allow immediate forwarding
     uint8_t rtp_relay_buf_[65536];
