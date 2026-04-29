@@ -59,36 +59,7 @@
 
 用于 `/tv` 路径下的 URL 自动转换。支持 `remove`、`replace` 和 `timeshift`（时间偏移）。
 
-```json
-{
-  "replace_templates": [
-    {
-      "action": "remove",
-      "match": "/{number}_Uni.sdp",
-      "description": "删除冗余字段"
-    },
-    {
-      "action": "replace",
-      "match": "/iptv/import",
-      "replacement": "/iptv",
-      "description": "替换 /iptv/import 为 /iptv"
-    },
-    {
-      "action": "replace",
-      "match": "tvdr={number}-{number}",
-      "replacement": "tvdr={number}GMT-{number}GMT",
-      "description": "补全回看地址"
-    },
-    {
-      "action": "timeshift",
-      "match": "tvdr={number}GMT-{number}GMT",
-      "shift_hours": -8,
-      "description": "将时间区间前移8小时"
-    }
-  ]
-}
-```
-
+具体参考 [config.json](./config.json)。
 ---
 
 ## 命令行参数
@@ -96,12 +67,16 @@
 ```bash
 Options:
   -p, --port            <port>  设置代理主端口 (默认: 8554)
-  -n, --enable-nat              开启 NAT 穿越 (仅 HTTP 模式有效)
+  -n, --enable-nat              开启 NAT 穿越
+      --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
   -r, --rtp-buffer-size <size>  设置 RTP 缓冲区包数量 (默认: 8192)
   -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 1500)
+  -t, --set-auth-token  <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口
       --mitm-interface  <iface> 设置 MITM 模式上游网口
+      --set-stun-host   <host>  设置 STUN 服务器地址 (默认: stun.l.google.com)
+      --set-stun-port   <port>  设置 STUN 服务器端口 (默认: 19302)
   -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
   -w, --watchdog                开启自动重启模式
   -d, --daemon                  后台运行
@@ -110,6 +85,21 @@ Options:
       --log-lines       <count> 设置日志滚动行数 (默认: 10000)
       --log-level       <level> 设置日志等级: error, warn, info, debug (默认: info)
 ```
+
+## NAT 穿越与打洞功能
+
+为了解决代理服务器或终端设备处于 NAT 防火墙（如光猫、拨号网关）后无法接收到上游 UDP RTP 视频流的问题，本项目提供了两种穿越机制：
+
+### 1. STUN 模式 (`--nat-method stun`)
+* **机制**：在 RTSP `SETUP` 协商前，使用 STUN 协议探测当前上游连接端口在 NAT 上的外部映射端口（WAN Port）。
+* **用途**：适配公网标准流媒体服务器，确保 `Transport` 头中填入的是真正可触达的外部打洞端口。
+
+### 2. 中兴 IPTV 打洞模式 (`--nat-method zte`)
+* **机制**：模拟中兴机顶盒（ZTE STB）协议：
+  * 向 IPTV 服务器发送专用头部（`User-Agent`, `x-NAT` 等）。
+  * 强制协议降级至 `MP2T/RTP/UDP`。
+  * 在协商出的 RTP 传输通道上，以 20 秒/次 的频率周期性主动向上游发送 **84 字节的身份验证心跳报文**，利用其维持并撕开 NAT 映射路径。
+* **用途**：适配各种需要特殊 IPTV 终端认证打洞才能下发视频流的运营商专网环境。
 
 > [!TIP]
 > **多接口支持**：现在你可以为 HTTP 模式和 MITM 模式分别指定上游网口（例如分别走两个不同的 IPTV 专网），并可以限定服务只在特定的本地网口（如 `br-lan`）监听。

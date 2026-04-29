@@ -1,0 +1,27 @@
+{
+    "replace_templates": [
+        {
+            "action": "remove",
+            "match": "/{number}_Uni.sdp",
+            "description": "删除冗余字段"
+        },
+        {
+            "action": "replace",
+            "match": "/iptv/import",
+            "replacement": "/iptv",
+            "description": "替换 /iptv/import 为 /iptv"
+        },
+        {
+            "action": "replace",
+            "match": "tvdr={number}-{number}",
+            "replacement": "tvdr={number}GMT-{number}GMT",
+            "description": "补全回看地址"
+        },
+        {
+            "action": "timeshift",
+            "match": "tvdr={number}GMT-{number}GMT",
+            "shift_hours": -8,
+            "description": "将时间区间前移8小时"
+        }
+    ]
+}

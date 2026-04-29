@@ -163,8 +163,8 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "      --log-lines       <count> Set maximum log file lines (default: 10000)" << std::endl;
     std::cout << "      --log-level       <level> Set log level: error, warn, info, debug (default: info)" << std::endl;
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
-    std::cout << "      --set-stun-host,  <port>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
-    std::cout << "      --set-stun-port,  <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
+    std::cout << "      --set-stun-host   <host>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
+    std::cout << "      --set-stun-port   <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
 }
 
 void ServerConfig::kill_previous_instance()
