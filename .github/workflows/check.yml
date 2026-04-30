@@ -117,3 +117,51 @@ jobs:
         run: |
           meson setup builddir --cross-file=crossfile.ini --buildtype=release -Disstatic=true
           meson compile -C builddir -j$(nproc)
+
+  openwrt-ipk-check:
+    name: OpenWrt IPK Check (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip zstd python3-pyelftools
+
+      - name: Cache SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: sdk-23.05-x64-${{ hashFiles('openwrt/rtsproxy/Makefile') }}
+
+      - name: Download SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p sdk
+          wget https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz -O sdk.tar.xz
+          tar xf sdk.tar.xz -C sdk --strip-components=1
+
+      - name: Build IPK
+        run: |
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+          # Remove any existing rtsproxy package from feeds to avoid version conflict
+          rm -rf package/feeds/*/rtsproxy
+          rm -rf package/rtsproxy
+          
+          mkdir -p package/rtsproxy
+          cp -r ../openwrt/rtsproxy/* package/rtsproxy/
+          cp -r ../src package/rtsproxy/
+          cp -r ../include package/rtsproxy/
+          cp -r ../webui package/rtsproxy/
+          cp ../meson.build package/rtsproxy/
+          cp ../meson_options.txt package/rtsproxy/
+          
+          make defconfig
+          make package/rtsproxy/compile V=s
+
