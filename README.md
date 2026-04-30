@@ -57,6 +57,7 @@
 用于 `/tv` 路径下的 URL 自动转换。支持语法 `remove`、`replace` 和 `timeshift`（时间偏移）。
 
 具体参考 [config.json](./config.json)
+
 ---
 
 ## 命令行参数
