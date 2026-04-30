@@ -1,4 +1,5 @@
 #include "../include/http_handle.h"
+#include "../include/statistics.h"
 #include "../include/logger.h"
 #include "../include/epoll_loop.h"
 #include "../include/rtsp_client.h"
@@ -192,7 +193,7 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         }
     }
 
-    if (url == "/api/status")
+    if (url.find("/api/status") == 0)
     {
         json status;
         status["pool"]["available"] = pool.get_available_count();
@@ -202,7 +203,37 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         status["pool"]["buffer_size"] = pool.get_buffer_size();
         status["pool"]["total_bytes"] = pool.get_total_allocated() * pool.get_buffer_size();
         
+        auto& stats = Statistics::getInstance();
+        stats.setActiveClients(loop->get_client_count());
+        status["stats"]["traffic"] = stats.getTotalBytes();
+        status["stats"]["bandwidth"] = (uint64_t)stats.getBandwidth();
+        status["stats"]["active_clients"] = stats.getActiveClients();
+        status["clients"] = loop->get_all_clients_info();
+        
         send_json_response(client_fd, status);
+        return;
+    }
+    
+    if (url.find("/api/logs") == 0)
+    {
+        json response;
+        response["logs"] = Logger::getRecentLogs();
+        response["level"] = (int)Logger::getLogLevel();
+        send_json_response(client_fd, response);
+        return;
+    }
+
+    if (url.find("/api/loglevel") == 0)
+    {
+        size_t lpos = url.find("level=");
+        if (lpos != std::string::npos) {
+            int level = std::stoi(url.substr(lpos + 6));
+            Logger::setLogLevel((LogLevel)level);
+        }
+        json response;
+        response["status"] = "ok";
+        response["level"] = (int)Logger::getLogLevel();
+        send_json_response(client_fd, response);
         return;
     }
 

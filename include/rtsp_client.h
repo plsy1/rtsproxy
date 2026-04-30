@@ -23,6 +23,11 @@ public:
     ~RTSPClient() override;
 
     void set_on_closed_callback(ClosedCallback cb) override;
+    json get_info() const override;
+    bool is_closed() const override { return is_closed_; }
+
+private:
+    bool is_closed_ = false;
 
 private:
     enum class RtspState

@@ -7,8 +7,8 @@
 #include <map>
 #include <memory>
 #include <functional>
+#include "../include/iclient.h"
 
-class IClient;
 class SocketCtx;
 
 class EpollLoop
@@ -30,6 +30,8 @@ public:
     void add_client_to_map(int client_fd, std::unique_ptr<IClient> client);
 
     void remove_client_from_map(int client_fd);
+    size_t get_client_count() const { return client_ptr_map.size(); }
+    json get_all_clients_info() const;
 
 private:
     int epfd_;

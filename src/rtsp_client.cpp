@@ -1,3 +1,4 @@
+#include "../include/statistics.h"
 #include "../include/rtsp_client.h"
 #include "../include/epoll_loop.h"
 #include "../include/logger.h"
@@ -343,6 +344,11 @@ void RTSPClient::on_rtp_readable()
 
     if (get_rtp_payload_offset(buf.get(), recv_len, payload_offset))
     {
+        if (send_queue_.size() > 512) {
+            auto &old = send_queue_.front();
+            if (old.data) buffer_pool_.release(std::move(old.data));
+            send_queue_.pop_front();
+        }
         send_queue_.push_back(Packet{std::move(buf), recv_len, payload_offset});
     }
     else if (!is_init_ok)
@@ -388,6 +394,11 @@ void RTSPClient::handle_interleaved_packet(uint8_t channel, const uint8_t *data,
     size_t actual_len = std::min(len, static_cast<size_t>(1500));
     if (get_rtp_payload_offset(buf.get(), actual_len, payload_offset))
     {
+        if (send_queue_.size() > 512) {
+            auto &old = send_queue_.front();
+            if (old.data) buffer_pool_.release(std::move(old.data));
+            send_queue_.pop_front();
+        }
         send_queue_.push_back(Packet{std::move(buf), actual_len, payload_offset});
     }
     else
@@ -416,6 +427,7 @@ void RTSPClient::on_client_writable()
             }
         }
 
+        Statistics::getInstance().addBytes(n);
         packet.offset += n;
 
         if (packet.offset == packet.length)
@@ -439,7 +451,10 @@ void RTSPClient::on_client_readable()
 
 void RTSPClient::on_client_closed()
 {
-    on_closed_callback_();
+    if (is_closed_) return;
+    is_closed_ = true;
+    if (on_closed_callback_)
+        on_closed_callback_();
 }
 
 void RTSPClient::push_request_into_queue(RtspMethod method, const std::string &uri, const std::string &extra_headers, const std::string &body)
@@ -805,3 +820,17 @@ RTSPClient::FdGuard &RTSPClient::FdGuard::operator=(FdGuard &&other) noexcept
 int &RTSPClient::FdGuard::get_ref() { return fd_; }
 int RTSPClient::FdGuard::get() const { return fd_; }
 RTSPClient::FdGuard::operator int() const { return fd_; }
+json RTSPClient::get_info() const
+{
+    json info;
+    info["type"] = "http-proxy";
+    info["transport"] = is_tcp_mode_ ? "TCP" : "UDP";
+    
+    char addr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr_.sin_addr, addr, INET_ADDRSTRLEN);
+    info["downstream"] = std::string(addr) + ":" + std::to_string(ntohs(client_addr_.sin_port));
+    
+    info["upstream"] = ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port);
+    info["proxy"] = "Port:" + std::to_string(ServerConfig::getPort());
+    return info;
+}

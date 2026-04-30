@@ -1,3 +1,4 @@
+#include "../include/statistics.h"
 #include "../include/rtsp_mitm_client.h"
 #include "../include/http_parser.h"
 #include "../include/epoll_loop.h"
@@ -711,6 +712,7 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
             {
                 sendto(rtp_ds_fd_, buf.get(), n, 0,
                        (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
+                Statistics::getInstance().addBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -743,6 +745,7 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
             {
                 sendto(rtcp_ds_fd_, buf.get(), n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
+                Statistics::getInstance().addBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -759,6 +762,14 @@ void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t 
     uint16_t nlen = htons(static_cast<uint16_t>(len));
     memcpy(buf.get() + 2, &nlen, 2);
     memcpy(buf.get() + 4, data, len);
+
+    // Prevent memory exhaustion by limiting queue size (Drop oldest if full)
+    if (to_downstream_q_.size() > 512)
+    {
+        auto &old_packet = to_downstream_q_.front();
+        if (old_packet.data) pool_.release(std::move(old_packet.data));
+        to_downstream_q_.pop_front();
+    }
 
     to_downstream_q_.push_back(Packet{std::move(buf), len + 4, 0});
     
@@ -777,6 +788,7 @@ void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8
         {
             sendto(rtp_us_fd_, data, len, 0,
                    (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+            Statistics::getInstance().addBytes(len);
         }
     }
     else if (channel == ds_interleaved_rtcp_)
@@ -785,6 +797,7 @@ void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8
         {
             sendto(rtcp_us_fd_, data, len, 0,
                    (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
+            Statistics::getInstance().addBytes(len);
         }
     }
 }
@@ -796,15 +809,19 @@ void RTSPMitmClient::handle_interleaved_from_upstream(uint8_t channel, const uin
     {
         if (is_downstream_tcp_)
             send_interleaved_downstream(ds_interleaved_rtp_, data, len);
-        else if (client_rtp_addr_.sin_port != 0)
+        else if (client_rtp_addr_.sin_port != 0) {
             sendto(rtp_ds_fd_, data, len, 0, (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
+            Statistics::getInstance().addBytes(len);
+        }
     }
     else if (channel == us_interleaved_rtcp_)
     {
         if (is_downstream_tcp_)
             send_interleaved_downstream(ds_interleaved_rtcp_, data, len);
-        else if (client_rtcp_addr_.sin_port != 0)
+        else if (client_rtcp_addr_.sin_port != 0) {
             sendto(rtcp_ds_fd_, data, len, 0, (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
+            Statistics::getInstance().addBytes(len);
+        }
     }
 }
 
@@ -833,6 +850,7 @@ void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
             {
                 sendto(rtp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
+                Statistics::getInstance().addBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -864,6 +882,7 @@ void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/)
             {
                 sendto(rtcp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
+                Statistics::getInstance().addBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -1014,6 +1033,7 @@ void RTSPMitmClient::on_downstream_writable()
                          packet.length - packet.offset, 0);
         if (n > 0)
         {
+            Statistics::getInstance().addBytes(n);
             packet.offset += n;
             if (packet.offset == packet.length)
             {
@@ -1373,4 +1393,27 @@ void RTSPMitmClient::process_pending_setup()
 
     to_upstream_q_.push_back(req);
     loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+}
+
+json RTSPMitmClient::get_info() const
+{
+    json info;
+    info["type"] = "mitm";
+    info["transport"] = is_downstream_tcp_ ? "TCP" : "UDP";
+    
+    char addr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr_.sin_addr, addr, INET_ADDRSTRLEN);
+    info["downstream"] = std::string(addr) + ":" + std::to_string(ntohs(client_addr_.sin_port));
+    
+    if (server_rtp_addr_.sin_port != 0) {
+        inet_ntop(AF_INET, &server_rtp_addr_.sin_addr, addr, INET_ADDRSTRLEN);
+        info["upstream"] = std::string(addr) + ":" + std::to_string(ntohs(server_rtp_addr_.sin_port));
+    } else {
+        info["upstream"] = "Connecting...";
+    }
+    
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+    info["proxy"] = std::to_string(duration);
+    return info;
 }

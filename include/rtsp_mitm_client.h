@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <functional>
 #include <memory>
+#include <chrono>
 
 class EpollLoop;
 #include "../include/buffer_pool.h"
@@ -34,6 +35,8 @@ public:
     ~RTSPMitmClient() override;
 
     void set_on_closed_callback(ClosedCallback cb) override;
+    json get_info() const override;
+    bool is_closed() const override { return closed_; }
 
 private:
     /* ------------------------------------------------------------------ */
@@ -146,6 +149,7 @@ private:
     EpollLoop *loop_;
     BufferPool &pool_;
     ClosedCallback on_closed_;
+    std::chrono::steady_clock::time_point start_time_ = std::chrono::steady_clock::now();
 
     /* downstream (the RTSP client that connected to us) */
     FdGuard downstream_fd_;

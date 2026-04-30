@@ -12,10 +12,17 @@ std::ofstream Logger::logFile;
 std::string Logger::logFilePath;
 size_t Logger::maxLogLines = 10000; // Default 10000 lines
 size_t Logger::currentLogLines = 0;
+std::deque<std::string> Logger::logBuffer;
 
 void Logger::setLogLevel(LogLevel level)
 {
     currentLevel = level;
+}
+
+std::vector<std::string> Logger::getRecentLogs()
+{
+    std::lock_guard<std::mutex> lock(logMutex);
+    return std::vector<std::string>(logBuffer.begin(), logBuffer.end());
 }
 
 void Logger::setLogFile(const std::string &path, size_t maxLines)
@@ -59,6 +66,12 @@ void Logger::log(LogLevel level, const std::string &msg)
     std::string formatted_msg = "[" + timestamp + "] [" + level_str + "] " + msg + "\n";
     
     std::lock_guard<std::mutex> lock(logMutex);
+    
+    // Add to memory buffer
+    logBuffer.push_back(formatted_msg);
+    if (logBuffer.size() > maxBufferSize) {
+        logBuffer.pop_front();
+    }
     
     if (logFile.is_open()) {
         // Log rotation based on line count

@@ -155,3 +155,13 @@ void EpollLoop::remove_client_from_map(int client_fd)
 {
     client_ptr_map.erase(client_fd);
 }
+json EpollLoop::get_all_clients_info() const
+{
+    json clients = json::array();
+    for (auto const& [fd, client] : client_ptr_map) {
+        if (client && !client->is_closed()) {
+            clients.push_back(client->get_info());
+        }
+    }
+    return clients;
+}

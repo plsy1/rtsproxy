@@ -3,61 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTProxy Memory Pool Status</title>
+    <title>RTSProxy Dashboard</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="container">
         <header>
-            <div class="logo">
-                <span class="icon">M</span>
-                <h1>MEM-POOL <span>v1.0</span></h1>
+            <div class="title-group">
+                <h1>RTSProxy Dashboard</h1>
             </div>
             <div class="status-badge" id="server-status">
                 <span class="dot"></span> ONLINE
             </div>
         </header>
 
-        <main>
-            <section class="stats-grid">
-                <div class="stat-card">
-                    <h3>Available Buffers</h3>
-                    <div class="value" id="available-count">0</div>
-                    <div class="sub">Free and ready to use</div>
+        <!-- STATUS ROW: All metrics in one line -->
+        <div class="status-bar">
+            <div class="stat-item">
+                <span class="label">Bandwidth</span>
+                <span class="value" id="bandwidth">0 Mbps</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Traffic</span>
+                <span class="value" id="total-traffic">0 B</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Clients</span>
+                <span class="value" id="active-clients">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Used Buffers</span>
+                <span class="value" id="used-count">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Total Buffers</span>
+                <span class="value" id="total-buffers">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Total RAM</span>
+                <span class="value" id="total-memory">0 MB</span>
+            </div>
+        </div>
+
+        <main class="main-content">
+            <!-- LEFT: Active Sessions -->
+            <section class="sessions-area">
+                <div class="card-header">
+                    <h2>Active Sessions</h2>
                 </div>
-                <div class="stat-card">
-                    <h3>Used Buffers</h3>
-                    <div class="value" id="used-count">0</div>
-                    <div class="sub" id="used-percent">0% occupancy (Peak: 0)</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Total Allocated</h3>
-                    <div class="value" id="total-count">0</div>
-                    <div class="sub">Dynamic pool size</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Total Memory</h3>
-                    <div class="value" id="total-memory">0 MB</div>
-                    <div class="sub" id="buffer-size-info">Size: 0 KB each</div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Downstream</th>
+                                <th>Upstream</th>
+                                <th>Type</th>
+                                <th>Protocol</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessions-body">
+                            <!-- JS populated -->
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
-            <section class="visualization">
+            <!-- RIGHT: Live Logs -->
+            <section class="logs-area">
                 <div class="card-header">
-                    <h2>Buffer Allocation Map</h2>
-                    <div class="legend">
-                        <span class="item used"><span class="box"></span> Used</span>
-                        <span class="item free"><span class="box"></span> Free</span>
+                    <h2>Live Logs</h2>
+                    <div class="controls">
+                        <select id="log-level-select">
+                            <option value="0">DEBUG</option>
+                            <option value="1" selected>INFO</option>
+                            <option value="2">WARN</option>
+                            <option value="3">ERROR</option>
+                        </select>
+                        <button id="clear-logs">Clear</button>
                     </div>
                 </div>
-                <div class="buffer-grid" id="buffer-grid">
-                    <!-- Blocks will be injected here -->
+                <div class="log-container" id="log-display">
+                    <!-- Logs will appear here -->
                 </div>
             </section>
         </main>
-
-
     </div>
     <script src="main.js"></script>
 </body>
