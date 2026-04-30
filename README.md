@@ -52,7 +52,7 @@
 
 ---
 
-## 配置说明 (config.json)
+## 配置说明
 
 用于 `/tv` 路径下的 URL 自动转换。支持语法 `remove`、`replace` 和 `timeshift`（时间偏移）。
 
