@@ -10,8 +10,8 @@ start_service() {
 	local enabled
 	local port
 	local enable_nat
-	local rtp_buffer_size
-	local udp_packet_size
+	local buffer_pool_count
+	local buffer_pool_block_size
 	local auth_token
 	local http_interface
 	local mitm_interface
@@ -30,8 +30,8 @@ start_service() {
 	config_get port "main" "port" "8554"
 	config_get_bool enable_nat "main" "enable_nat" 0
 	config_get nat_method "main" "nat_method" "stun"
-	config_get rtp_buffer_size "main" "rtp_buffer_size" "8192"
-	config_get udp_packet_size "main" "udp_packet_size" "1500"
+	config_get buffer_pool_count "main" "buffer_pool_count" "8192"
+	config_get buffer_pool_block_size "main" "buffer_pool_block_size" "2048"
 	config_get auth_token "main" "auth_token" ""
 	config_get http_interface "main" "http_interface" ""
 	config_get mitm_interface "main" "mitm_interface" ""
@@ -45,8 +45,8 @@ start_service() {
 	procd_open_instance
 	procd_set_param command "$PROG"
 	procd_append_param command -p "$port"
-	procd_append_param command -r "$rtp_buffer_size"
-	procd_append_param command -u "$udp_packet_size"
+	procd_append_param command -r "$buffer_pool_count"
+	procd_append_param command -u "$buffer_pool_block_size"
 	procd_append_param command -j "$json_path"
 	
 	[ "$enable_nat" -eq 1 ] && procd_append_param command -n

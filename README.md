@@ -67,8 +67,8 @@ Options:
   -p, --port            <port>  设置代理主端口 (默认: 8554)
   -n, --enable-nat              开启 NAT 穿越
       --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
-  -r, --rtp-buffer-size <size>  设置 RTP 缓冲区包数量 (默认: 8192)
-  -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 2048)
+  -r, --rtp-buffer-size <count> 设置 BufferPool 块数量 (默认: 8192)
+  -u, --udp-packet-size <size>  设置 BufferPool 块大小 (默认: 2048)
   -t, --set-auth-token  <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口

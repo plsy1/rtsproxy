@@ -87,10 +87,10 @@ int main(int argc, char *argv[])
             ServerConfig::enableNat();
             break;
         case 'r':
-            ServerConfig::setRtpBufferSize(std::atoi(optarg));
+            ServerConfig::setBufferPoolCount(std::atoi(optarg));
             break;
         case 'u':
-            ServerConfig::setUdpPacketSize(std::atoi(optarg));
+            ServerConfig::setBufferPoolBlockSize(std::atoi(optarg));
             break;
         case 't':
             ServerConfig::setToken(optarg);
@@ -222,7 +222,7 @@ int main(int argc, char *argv[])
     httpParser::load_json(ServerConfig::getJsonPath());
 
     EpollLoop loop;
-    BufferPool pool(ServerConfig::getUdpPacketSize(), ServerConfig::getRtpBufferSize());
+    BufferPool pool(ServerConfig::getBufferPoolBlockSize(), ServerConfig::getBufferPoolCount());
 
     int listen_port = ServerConfig::getPort();
     int listen_fd = create_listen_socket(listen_port, ServerConfig::getListenInterface());

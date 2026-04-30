@@ -389,9 +389,9 @@ void RTSPClient::handle_interleaved_packet(uint8_t channel, const uint8_t *data,
         return;
 
     auto buf = buffer_pool_.acquire();
-    memcpy(buf.get(), data, std::min(len, static_cast<size_t>(1500))); // Max 1500 for consistency
-
-    size_t actual_len = std::min(len, static_cast<size_t>(1500));
+    size_t max_buf_size = buffer_pool_.get_buffer_size();
+    size_t actual_len = std::min(len, max_buf_size);
+    memcpy(buf.get(), data, actual_len);
     if (get_rtp_payload_offset(buf.get(), actual_len, payload_offset))
     {
         if (send_queue_.size() > 512) {
@@ -501,6 +501,17 @@ void RTSPClient::init_rtp_rtcp_sockets()
         if (on_closed_callback_) on_closed_callback_();
         return;
     }
+
+    // Optimize UDP buffers using ServerConfig values
+    int total_buf_size = ServerConfig::getBufferPoolCount() * ServerConfig::getBufferPoolBlockSize();
+    if (total_buf_size < 1024 * 1024) total_buf_size = 2 * 1024 * 1024; // Min 2MB
+
+    auto optimize = [&](int fd) {
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
+    };
+    optimize(rtp_fd_);
+    optimize(rtcp_fd_);
 
     rtp_ctx_ = std::make_unique<SocketCtx>(
         rtp_fd_,

@@ -327,7 +327,7 @@ bool RTSPMitmClient::init_relay_sockets()
     loop_->set(rtcp_ds_ctx_.get(), rtcp_ds_fd_, EPOLLIN);
 
     // Optimize UDP buffers using ServerConfig values
-    int total_buf_size = ServerConfig::getRtpBufferSize() * ServerConfig::getUdpPacketSize();
+    int total_buf_size = ServerConfig::getBufferPoolCount() * ServerConfig::getBufferPoolBlockSize();
     if (total_buf_size < 1024 * 1024) total_buf_size = 2 * 1024 * 1024; // Min 2MB
 
     auto optimize = [&](int fd) {

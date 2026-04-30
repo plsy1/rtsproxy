@@ -9,8 +9,8 @@
 int ServerConfig::port = 8554;
 bool ServerConfig::enable_nat = false;
 std::string ServerConfig::nat_method = "stun";
-int ServerConfig::rtp_buffer_size = 8192;
-int ServerConfig::udp_packet_size = 2048;
+int ServerConfig::buffer_pool_count = 8192;
+int ServerConfig::buffer_pool_block_size = 2048;
 int ServerConfig::stun_server_port = 19302;
 std::string ServerConfig::stun_server_host = "stun.l.google.com";
 std::string ServerConfig::json_path = "config.json";
@@ -39,14 +39,14 @@ void ServerConfig::setNatMethod(const std::string &method)
     Logger::info("[CONFIG] NAT method set to: " + method);
 }
 
-void ServerConfig::setRtpBufferSize(int size)
+void ServerConfig::setBufferPoolCount(int count)
 {
-    rtp_buffer_size = size;
+    buffer_pool_count = count;
 }
 
-void ServerConfig::setUdpPacketSize(int size)
+void ServerConfig::setBufferPoolBlockSize(int size)
 {
-    udp_packet_size = size;
+    buffer_pool_block_size = size;
 }
 
 void ServerConfig::setStunPort(int port)
@@ -110,14 +110,14 @@ std::string ServerConfig::getNatMethod()
     return nat_method;
 }
 
-int ServerConfig::getRtpBufferSize()
+int ServerConfig::getBufferPoolCount()
 {
-    return rtp_buffer_size;
+    return buffer_pool_count;
 }
 
-int ServerConfig::getUdpPacketSize()
+int ServerConfig::getBufferPoolBlockSize()
 {
-    return udp_packet_size;
+    return buffer_pool_block_size;
 }
 
 int ServerConfig::getStunPort()
@@ -172,8 +172,8 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -p, --port            <port>  Set HTTP server port (default: " << port << ")" << std::endl;
     std::cout << "  -n, --enable-nat              Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
     std::cout << "      --nat-method      <method> Set NAT method: stun, zte (default: " << nat_method << ")" << std::endl;
-    std::cout << "  -r, --rtp-buffer-size <size>  Set RTP buffer size (default: " << rtp_buffer_size << ")" << std::endl;
-    std::cout << "  -u, --udp-packet-size <size>  Set UDP packet size (default: " << udp_packet_size << ")" << std::endl;
+    std::cout << "  -r, --rtp-buffer-size <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
+    std::cout << "  -u, --udp-packet-size <size>  Set BufferPool block size (default: " << buffer_pool_block_size << ")" << std::endl;
     std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;
     std::cout << "      --http-interface  <iface> Set HTTP mode upstream interface" << std::endl;
     std::cout << "      --mitm-interface  <iface> Set MITM mode upstream interface" << std::endl;

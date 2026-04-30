@@ -40,11 +40,11 @@ return view.extend({
 		o.default = 'stun';
 		o.depends('enable_nat', '1');
 
-		o = s.taboption('basic', form.Value, 'rtp_buffer_size', _('RTP Buffer Size'), _('Number of packets in RTP buffer (default: 8192)'));
+		o = s.taboption('basic', form.Value, 'buffer_pool_count', _('Buffer Pool Count'), _('Number of blocks in the buffer pool (default: 8192)'));
 		o.datatype = 'uinteger';
 		o.placeholder = '8192';
 
-		o = s.taboption('basic', form.Value, 'udp_packet_size', _('UDP Packet Size'), _('UDP packet size base (default: 2048)'));
+		o = s.taboption('basic', form.Value, 'buffer_pool_block_size', _('Buffer Pool Block Size'), _('Size of each block in the buffer pool (default: 2048)'));
 		o.datatype = 'uinteger';
 		o.placeholder = '2048';
 
