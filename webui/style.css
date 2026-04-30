@@ -105,7 +105,7 @@ section {
 /* Tables */
 .table-container { flex-grow: 1; overflow-y: auto; padding: 0 10px; }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; padding: 12px 10px; font-size: 0.7rem; color: var(--text-secondary); sticky: top; background: var(--card-bg); z-index: 1; }
+th { text-align: left; padding: 12px 10px; font-size: 0.7rem; color: var(--text-secondary); position: sticky; top: 0; background: var(--card-bg); z-index: 1; }
 td { padding: 12px 10px; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.02); font-family: 'JetBrains Mono', monospace; }
 
 /* Logs */
@@ -125,9 +125,25 @@ td { padding: 12px 10px; font-size: 0.8rem; border-bottom: 1px solid rgba(255,25
     white-space: pre-wrap;
     word-break: break-word;
 }
-.log-entry.error { border-left-color: #ef4444; color: #fca5a5; }
-.log-entry.warn { border-left-color: #f59e0b; color: #fde68a; }
-.log-entry.info { border-left-color: var(--accent-blue); color: #bae6fd; }
+.log-entry.error { 
+    border-left-color: #ef4444; 
+    color: #f87171; 
+    background: rgba(239, 68, 68, 0.05); 
+}
+.log-entry.warn { 
+    border-left-color: #f59e0b; 
+    color: #fbbf24; 
+    background: rgba(245, 158, 11, 0.05); 
+}
+.log-entry.info { 
+    border-left-color: var(--accent-blue); 
+    color: #7dd3fc; 
+}
+.log-entry.debug { 
+    border-left-color: var(--accent-purple); 
+    color: #c084fc; 
+    opacity: 0.8;
+}
 
 /* Tags */
 .tag { padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; }

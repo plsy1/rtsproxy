@@ -57,7 +57,7 @@ void Logger::setLogFile(const std::string &path, size_t maxLines)
 
 void Logger::log(LogLevel level, const std::string &msg)
 {
-    if (level > currentLevel)
+    if (level < currentLevel)
     {
         return;
     }
