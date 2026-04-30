@@ -56,6 +56,8 @@ jobs:
       - name: Build Packages
         run: |
           cd sdk
+          # Remove any existing rtsproxy package from feeds to avoid version conflict
+          rm -rf package/feeds/*/rtsproxy
           rm -rf package/rtsproxy package/luci-app-rtsproxy
           
           # 准备本体
@@ -64,6 +66,7 @@ jobs:
           cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
           cp -r $GITHUB_WORKSPACE/src package/rtsproxy/
           cp -r $GITHUB_WORKSPACE/include package/rtsproxy/
+          cp -r $GITHUB_WORKSPACE/webui package/rtsproxy/
           cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
           cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
           
