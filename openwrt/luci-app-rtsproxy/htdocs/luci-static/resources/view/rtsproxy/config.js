@@ -1,9 +1,14 @@
 "use strict";
 "require form";
 "require view";
+"require uci";
 "require tools.widgets as widgets";
 
 return view.extend({
+	load: function() {
+		return uci.load('rtsproxy');
+	},
+
 	render: function () {
 		var m, s, o;
 
@@ -17,6 +22,11 @@ return view.extend({
 
 		o = s.taboption('basic', form.Flag, 'enabled', _('Enable'));
 		o.rmempty = false;
+
+		var port = uci.get('rtsproxy', 'main', 'port') || '8554';
+		o = s.taboption('basic', form.DummyValue, '_webui', _('Management Dashboard'));
+		o.rawhtml = true;
+		o.default = '<a class="btn cbi-button cbi-button-apply" href="http://' + window.location.hostname + ':' + port + '/admin/" target="_blank" style="margin-top: 5px; display: inline-block;">' + _('Open WebUI') + '</a>';
 
 		o = s.taboption('basic', form.Value, 'port', _('Port'), _('Main listening port (default: 8554)'));
 		o.datatype = 'port';
@@ -34,9 +44,9 @@ return view.extend({
 		o.datatype = 'uinteger';
 		o.placeholder = '8192';
 
-		o = s.taboption('basic', form.Value, 'udp_packet_size', _('UDP Packet Size'), _('UDP packet size base (default: 1500)'));
+		o = s.taboption('basic', form.Value, 'udp_packet_size', _('UDP Packet Size'), _('UDP packet size base (default: 2048)'));
 		o.datatype = 'uinteger';
-		o.placeholder = '1500';
+		o.placeholder = '2048';
 
 		o = s.taboption('basic', form.Value, 'auth_token', _('Auth Token'), _('Optional token for authentication'));
 		o.password = true;
