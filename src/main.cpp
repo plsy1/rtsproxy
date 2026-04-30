@@ -39,6 +39,7 @@ void supervisor_sig_handler(int sig)
 
 void worker_sig_handler(int sig)
 {
+    (void)sig;
     // Note: Logger::info might not be 100% async-signal-safe, 
     // but we use a mutex inside so it's generally okay for exit paths.
     Logger::flush();
