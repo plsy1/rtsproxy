@@ -21,7 +21,7 @@ class MemoryPoolMonitor {
     private refreshInterval = 500;
     private gridElement: HTMLElement;
     private statusBadge: HTMLElement;
-    private lastUpdateEl: HTMLElement;
+    private lastUpdateEl: HTMLElement | null;
     
     private elements: {
         available: HTMLElement;
@@ -100,14 +100,16 @@ class MemoryPoolMonitor {
         this.elements.memory.innerText = `${mb} MB`;
         this.elements.bufSize.innerText = `Size: ${(buffer_size / 1024).toFixed(0)} KB each`;
 
-        this.lastUpdateEl.innerText = new Date().toLocaleTimeString();
+        if (this.lastUpdateEl) {
+            this.lastUpdateEl.innerText = new Date().toLocaleTimeString();
+        }
 
         this.updateGrid(allocated, used);
     }
 
     private updateGrid(total: number, used: number) {
         const currentBlocks = this.gridElement.children.length;
-        const displayTotal = Math.min(total, 2000); 
+        const displayTotal = Math.min(total, 10000); 
         const displayUsed = Math.floor((used / total) * displayTotal);
 
         if (currentBlocks !== displayTotal) {

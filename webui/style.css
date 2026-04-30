@@ -175,11 +175,11 @@ header {
 
 .buffer-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(12px, 1fr));
-    gap: 6px;
-    max-height: 400px;
-    overflow-y: auto;
-    padding-right: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(6px, 1fr));
+    gap: 2px;
+    min-height: 200px;
+    overflow: hidden;
+    padding: 2px;
 }
 
 .buffer-block {

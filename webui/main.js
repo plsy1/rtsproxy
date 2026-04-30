@@ -9,7 +9,7 @@ class MemoryPoolMonitor {
         this.refreshInterval = 500;
         this.gridElement = document.getElementById('buffer-grid');
         this.statusBadge = document.getElementById('server-status');
-        this.lastUpdateEl = document.getElementById('last-update');
+        this.lastUpdateEl = document.getElementById('last-update'); // May be null
 
         this.elements = {
             available: document.getElementById('available-count'),
@@ -75,7 +75,9 @@ class MemoryPoolMonitor {
         this.elements.memory.innerText = `${mb} MB`;
         this.elements.bufSize.innerText = `Size: ${(buffer_size / 1024).toFixed(0)} KB each`;
 
-        this.lastUpdateEl.innerText = new Date().toLocaleTimeString();
+        if (this.lastUpdateEl) {
+            this.lastUpdateEl.innerText = new Date().toLocaleTimeString();
+        }
 
         this.updateGrid(allocated, used);
     }
@@ -86,7 +88,7 @@ class MemoryPoolMonitor {
         const currentBlocks = this.gridElement.children.length;
 
         // Limit blocks to prevent browser lag if pool is huge
-        const displayTotal = Math.min(total, 2000);
+        const displayTotal = Math.min(total, 10000);
         const displayUsed = Math.floor((used / total) * displayTotal);
 
         if (currentBlocks !== displayTotal) {
