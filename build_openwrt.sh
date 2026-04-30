@@ -48,7 +48,8 @@ cd "$SDK_DIR"
 
 # 3. 关联当前源码
 echo "[3/4] 准备软件包源码..."
-# 清理旧的包定义
+# 清理旧的包定义和 Feeds 冲突
+rm -rf package/feeds/*/rtsproxy
 rm -rf package/rtsproxy package/luci-app-rtsproxy
 
 # 创建并复制核心包
@@ -57,6 +58,7 @@ cp "$PROJECT_DIR/openwrt/rtsproxy/Makefile" package/rtsproxy/
 cp -r "$PROJECT_DIR/openwrt/rtsproxy/files" package/rtsproxy/
 cp -r "$PROJECT_DIR/src" package/rtsproxy/
 cp -r "$PROJECT_DIR/include" package/rtsproxy/
+cp -r "$PROJECT_DIR/webui" package/rtsproxy/
 cp "$PROJECT_DIR/meson.build" package/rtsproxy/
 cp "$PROJECT_DIR/meson_options.txt" package/rtsproxy/
 
