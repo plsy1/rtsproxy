@@ -54,9 +54,9 @@
 
 ## 配置说明 (config.json)
 
-用于 `/tv` 路径下的 URL 自动转换。支持 `remove`、`replace` 和 `timeshift`（时间偏移）。
+用于 `/tv` 路径下的 URL 自动转换。支持语法 `remove`、`replace` 和 `timeshift`（时间偏移）。
 
-具体参考 [config.json](./config.json)。
+具体参考 [config.json](./config.json)
 ---
 
 ## 命令行参数
@@ -67,7 +67,7 @@ Options:
   -n, --enable-nat              开启 NAT 穿越
       --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
   -r, --rtp-buffer-size <size>  设置 RTP 缓冲区包数量 (默认: 8192)
-  -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 1500)
+  -u, --udp-packet-size <size>  设置 UDP 包大小基准 (默认: 2048)
   -t, --set-auth-token  <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口
@@ -93,7 +93,7 @@ Options:
 
 ### 2. 中兴 IPTV 打洞模式 (`--nat-method zte`)
 * **机制**：模拟中兴机顶盒（ZTE STB）协议：
-  * 在协商出的 RTP 传输通道上,主动向上游发送 **84 字节的身份验证心跳报文**，打通 NAT 映射路径。
+  * 在协商出的 RTP 传输通道上,主动向上游发送 **84 字节的身份验证报文**，打通 NAT 映射路径。
 * **用途**：适配中兴设备为客户端的 IPTV 运营商专网环境。
 
 > [!TIP]
