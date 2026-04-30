@@ -57,9 +57,11 @@ void serve_admin_file(int client_fd, std::string path)
     if (clean_path == "/admin/") clean_path = "/admin/index.html";
     
     // Replace /admin with webui
-    std::string local_path = "webui" + clean_path.substr(6);
+    std::string rel_path = "webui" + clean_path.substr(6);
+    std::string sys_path = "/usr/share/rtsproxy/www" + clean_path.substr(6);
+    std::string local_path = (access(rel_path.c_str(), F_OK) == 0) ? rel_path : sys_path;
     
-    std::ifstream ifs(local_path);
+    std::ifstream ifs(local_path, std::ios::binary);
     if (!ifs.is_open())
     {
         Logger::error("[SERVER] Admin file not found: " + local_path);

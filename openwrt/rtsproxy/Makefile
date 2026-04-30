@@ -20,6 +20,7 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ./src $(PKG_BUILD_DIR)/
 	$(CP) ./include $(PKG_BUILD_DIR)/
+	$(CP) ./webui $(PKG_BUILD_DIR)/
 	$(CP) ./meson.build $(PKG_BUILD_DIR)/
 	$(CP) ./meson_options.txt $(PKG_BUILD_DIR)/
 endef
@@ -42,6 +43,9 @@ define Package/rtsproxy/install
 	$(INSTALL_CONF) files/rtsproxy.config $(1)/etc/config/rtsproxy
 	$(INSTALL_DIR) $(1)/etc/rtsproxy
 	$(INSTALL_CONF) files/config.json $(1)/etc/rtsproxy/config.json
+	
+	$(INSTALL_DIR) $(1)/usr/share/rtsproxy/www
+	$(CP) $(PKG_BUILD_DIR)/webui/* $(1)/usr/share/rtsproxy/www/
 endef
 
 $(eval $(call BuildPackage,rtsproxy))
