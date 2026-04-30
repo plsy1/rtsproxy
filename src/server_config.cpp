@@ -18,6 +18,8 @@ std::string ServerConfig::auth_token = "";
 std::string ServerConfig::http_upstream_interface = "";
 std::string ServerConfig::mitm_upstream_interface = "";
 std::string ServerConfig::listen_interface = "";
+std::string ServerConfig::log_file_path = "";
+size_t ServerConfig::log_file_lines = 10000;
 
 void ServerConfig::setPort(int p)
 {
@@ -82,6 +84,16 @@ void ServerConfig::setListenInterface(std::string iface)
     listen_interface = iface;
 }
 
+void ServerConfig::setLogFile(std::string path)
+{
+    log_file_path = path;
+}
+
+void ServerConfig::setLogLines(size_t lines)
+{
+    log_file_lines = lines;
+}
+
 int ServerConfig::getPort()
 {
     return port;
@@ -141,6 +153,16 @@ std::string ServerConfig::getMitmUpstreamInterface()
 std::string ServerConfig::getListenInterface()
 {
     return listen_interface;
+}
+
+std::string ServerConfig::getLogFile()
+{
+    return log_file_path;
+}
+
+size_t ServerConfig::getLogLines()
+{
+    return log_file_lines;
 }
 
 void ServerConfig::printUsage(const std::string &program_name)

@@ -40,8 +40,6 @@ void supervisor_sig_handler(int sig)
 void worker_sig_handler(int sig)
 {
     (void)sig;
-    // Note: Logger::info might not be 100% async-signal-safe, 
-    // but we use a mutex inside so it's generally okay for exit paths.
     Logger::flush();
     _exit(0);
 }
@@ -78,8 +76,6 @@ int main(int argc, char *argv[])
     int opt;
     int longindex = -1;
     bool use_watchdog = false;
-    std::string log_file_path;
-    size_t log_file_lines = 10000; // 10000 lines default
     while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:l:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
@@ -142,11 +138,11 @@ int main(int argc, char *argv[])
             }
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-file") == 0)
             {
-                log_file_path = optarg;
+                ServerConfig::setLogFile(optarg);
             }
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-lines") == 0)
             {
-                log_file_lines = std::stoull(optarg);
+                ServerConfig::setLogLines(std::stoull(optarg));
             }
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "log-level") == 0)
             {
@@ -163,8 +159,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (!log_file_path.empty()) {
-        Logger::setLogFile(log_file_path, log_file_lines);
+    if (!ServerConfig::getLogFile().empty()) {
+        Logger::setLogFile(ServerConfig::getLogFile(), ServerConfig::getLogLines());
     }
 
     if (use_watchdog)
