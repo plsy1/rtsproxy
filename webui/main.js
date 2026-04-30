@@ -73,10 +73,11 @@ class Dashboard {
         const stats = data.stats || {};
         const pool = data.pool || {};
         
-        this.elements.bandwidth.innerText = `${(stats.bandwidth || 0).toFixed(2)} Mbps`;
+        const bandwidthMbps = (stats.bandwidth || 0) * 8 / 1000000;
+        this.elements.bandwidth.innerText = `${bandwidthMbps.toFixed(2)} Mbps`;
         this.elements.totalTraffic.innerText = this.formatBytes(stats.traffic || 0);
         this.elements.activeClients.innerText = stats.active_clients || 0;
-        this.elements.usedBuffers.innerText = pool.used || 0;
+        this.elements.usedBuffers.innerText = `${pool.used || 0} (Peak: ${pool.peak || 0})`;
         this.elements.totalBuffers.innerText = pool.allocated || 0;
         
         const totalMemoryMB = (pool.total_bytes || 0) / (1024 * 1024);

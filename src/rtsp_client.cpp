@@ -26,7 +26,7 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
       client_addr_(client_addr),
       client_fd_(client_fd, loop)
 {
-
+    start_time_ = std::chrono::steady_clock::now();
     ctx.rtsp_url = rtsp_url;
 
     loop->remove(client_fd);
@@ -831,6 +831,10 @@ json RTSPClient::get_info() const
     info["downstream"] = std::string(addr) + ":" + std::to_string(ntohs(client_addr_.sin_port));
     
     info["upstream"] = ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port);
-    info["proxy"] = "Port:" + std::to_string(ServerConfig::getPort());
+    
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+    info["proxy"] = std::to_string(duration);
+    
     return info;
 }

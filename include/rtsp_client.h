@@ -130,6 +130,7 @@ private:
     std::unique_ptr<SocketCtx> rtcp_ctx_;
     std::unique_ptr<SocketCtx> timer_ctx;
 
+    std::chrono::steady_clock::time_point start_time_;
     ClosedCallback on_closed_callback_;
 
     sockaddr_in client_addr_;
