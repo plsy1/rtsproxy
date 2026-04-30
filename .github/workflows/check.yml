@@ -32,9 +32,53 @@ jobs:
           meson setup builddir
           meson compile -C builddir
 
-  openwrt-build:
-    name: OpenWrt Build Check (x64)
+  cross-build-check:
+    name: Cross Build (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            cpu_family: aarch64
+            cpu: aarch64
+            tool: aarch64-unknown-linux-musl
+          - name: arm32hf
+            tool: arm-unknown-linux-musleabihf
+            cpu_family: arm
+            cpu: arm32hf
+          - name: arm32v7hf
+            tool: armv7-unknown-linux-musleabihf
+            cpu_family: arm
+            cpu: arm32v7hf
+          - name: i686
+            tool: i686-unknown-linux-musl
+            cpu_family: x86_64
+            cpu: i686
+          - name: mips32
+            tool: mips-unknown-linux-musl
+            cpu_family: mips
+            cpu: mips
+          - name: mips32sf
+            tool: mips-unknown-linux-muslsf
+            cpu_family: mips
+            cpu: mips32sf
+          - name: mipsel
+            tool: mipsel-unknown-linux-musl
+            cpu_family: mips
+            cpu: mips32el
+          - name: mipsel-sf
+            tool: mipsel-unknown-linux-muslsf
+            cpu_family: mips
+            cpu: mips32elsf
+          - name: riscv64
+            tool: riscv64-unknown-linux-musl
+            cpu_family: riscv64
+            cpu: riscv64
+          - name: x86_64
+            cpu_family: x86_64
+            cpu: x86_64
+            tool: x86_64-unknown-linux-musl
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,53 +86,34 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip qemu-utils zstd python3-pyelftools
+          sudo apt-get install -y meson ninja-build
 
-      - name: Cache SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: sdk
-          key: sdk-23.05-x64-${{ hashFiles('openwrt/rtsproxy/Makefile') }}
-
-      - name: Download and setup SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      - name: Download toolchain
         run: |
-          mkdir sdk
-          wget -q https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
-          tar xf openwrt-sdk-*.tar.* -C sdk --strip-components=1
-          rm openwrt-sdk-*.tar.*
-          cd sdk
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          sudo mkdir -p /opt/x-tools
+          wget https://github.com/cross-tools/musl-cross/releases/download/20250929/${{ matrix.tool }}.tar.xz
+          sudo tar xf ${{ matrix.tool }}.tar.xz -C /opt/x-tools
 
-      - name: Build Package
+      - name: Set up crossfile
         run: |
-          cd sdk
-          rm -rf package/rtsproxy package/luci-app-rtsproxy
-          
-          # 准备本体
-          mkdir -p package/rtsproxy
-          cp $GITHUB_WORKSPACE/openwrt/rtsproxy/Makefile package/rtsproxy/
-          cp -r $GITHUB_WORKSPACE/openwrt/rtsproxy/files package/rtsproxy/
-          cp -r $GITHUB_WORKSPACE/src package/rtsproxy/
-          cp -r $GITHUB_WORKSPACE/include package/rtsproxy/
-          cp $GITHUB_WORKSPACE/meson.build package/rtsproxy/
-          cp $GITHUB_WORKSPACE/meson_options.txt package/rtsproxy/
-          
-          # 准备 LuCI
-          mkdir -p package/luci-app-rtsproxy
-          cp $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/Makefile package/luci-app-rtsproxy/
-          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/root package/luci-app-rtsproxy/
-          cp -r $GITHUB_WORKSPACE/openwrt/luci-app-rtsproxy/htdocs package/luci-app-rtsproxy/ 2>/dev/null || true
+          # Determine endianness (MIPS/PPC are usually big, others little)
+          ENDIAN="little"
+          if [[ "${{ matrix.name }}" == mips* ]] && [[ "${{ matrix.name }}" != *el* ]]; then
+            ENDIAN="big"
+          fi
 
-          # 修复换行符
-          find package/rtsproxy package/luci-app-rtsproxy -type f -exec sed -i 's/\r$//' {} +
+          echo '[host_machine]' > crossfile.ini
+          echo "system = 'linux'" >> crossfile.ini
+          echo "cpu_family = '${{ matrix.cpu_family }}'" >> crossfile.ini
+          echo "cpu = '${{ matrix.cpu }}'" >> crossfile.ini
+          echo "endian = '$ENDIAN'" >> crossfile.ini
+          echo '' >> crossfile.ini
+          echo '[binaries]' >> crossfile.ini
+          echo "cpp = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-g++'" >> crossfile.ini
+          echo "ar = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-ar'" >> crossfile.ini
+          echo "strip = '/opt/x-tools/${{ matrix.tool }}/bin/${{ matrix.tool }}-strip'" >> crossfile.ini
 
-          # 配置并编译
-          echo "CONFIG_PACKAGE_rtsproxy=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-rtsproxy=y" >> .config
-          make defconfig
-
-          make package/rtsproxy/compile V=s
-          make package/luci-app-rtsproxy/compile V=s
+      - name: Build
+        run: |
+          meson setup builddir --cross-file=crossfile.ini --buildtype=release -Disstatic=true
+          meson compile -C builddir -j$(nproc)

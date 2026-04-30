@@ -15,6 +15,9 @@ else
     message('Static compilation is disabled.')
 endif
 
+cpp = meson.get_compiler('cpp')
+atomic_dep = cpp.find_library('atomic', required: false)
+
 src_dir = 'src'
 
 inc_dir = 'include'
@@ -36,7 +39,8 @@ executable(
         src_dir / 'socket_helper.cpp',
     ),
     include_directories: include_directories(inc_dir),
-   install: true,
+    install: true,
     install_dir: 'bin',
     link_args: ldflags,
+    dependencies: [atomic_dep],
 )
