@@ -331,7 +331,7 @@ void RTSPClient::on_rtp_writable()
 void RTSPClient::on_rtp_readable()
 {
     auto buf = buffer_pool_.acquire();
-    ssize_t n = recvfrom(rtp_fd_, buf.get(), 1500, 0, nullptr, nullptr);
+    ssize_t n = recvfrom(rtp_fd_, buf.get(), buffer_pool_.get_buffer_size(), 0, nullptr, nullptr);
 
     if (n <= 0)
     {

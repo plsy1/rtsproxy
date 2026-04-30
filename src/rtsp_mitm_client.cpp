@@ -198,6 +198,12 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
 
 RTSPMitmClient::~RTSPMitmClient()
 {
+    for (auto &packet : to_downstream_q_) {
+        if (packet.data) {
+            pool_.release(std::move(packet.data));
+        }
+    }
+    to_downstream_q_.clear();
 }
 
 void RTSPMitmClient::set_on_closed_callback(ClosedCallback cb)
@@ -656,13 +662,14 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+        auto buf = pool_.acquire();
+        ssize_t n = recvfrom(rtp_us_fd_, buf.get(), pool_.get_buffer_size(), 0,
                              (sockaddr *)&src, &slen);
         if (n > 0)
         {
             std::string wan_ip;
             uint16_t wan_port = 0;
-            if (StunClient::extract_stun_mapping_from_response(rtp_relay_buf_, n, wan_ip, wan_port) == 0)
+            if (StunClient::extract_stun_mapping_from_response(buf.get(), n, wan_ip, wan_port) == 0)
             {
                 nat_wan_port_us_ = wan_port;
                 Logger::debug("[MITM] STUN mapped public port for RTP: " + std::to_string(nat_wan_port_us_));
@@ -676,6 +683,7 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
             state_ = State::IDLE;
             process_pending_setup();
         }
+        pool_.release(std::move(buf));
         return;
     }
 
@@ -683,10 +691,13 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+        auto buf = pool_.acquire();
+        ssize_t n = recvfrom(rtp_us_fd_, buf.get(), pool_.get_buffer_size(), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0)
+        if (n <= 0) {
+            pool_.release(std::move(buf));
             break;
+        }
 
         // Packet from upstream server -> send to downstream client
         if (src.sin_port == server_rtp_addr_.sin_port &&
@@ -694,14 +705,15 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
         {
             if (is_downstream_tcp_)
             {
-                send_interleaved_downstream(ds_interleaved_rtp_, rtp_relay_buf_, n);
+                send_interleaved_downstream(ds_interleaved_rtp_, buf.get(), n);
             }
             else if (client_rtp_addr_.sin_port != 0)
             {
-                sendto(rtp_ds_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtp_ds_fd_, buf.get(), n, 0,
                        (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
             }
         }
+        pool_.release(std::move(buf));
     }
 }
 
@@ -711,10 +723,13 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtcp_us_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+        auto buf = pool_.acquire();
+        ssize_t n = recvfrom(rtcp_us_fd_, buf.get(), pool_.get_buffer_size(), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0)
+        if (n <= 0) {
+            pool_.release(std::move(buf));
             break;
+        }
 
         // Packet from upstream server -> send to downstream client
         if (src.sin_port == server_rtcp_addr_.sin_port &&
@@ -722,14 +737,15 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         {
             if (is_downstream_tcp_)
             {
-                send_interleaved_downstream(ds_interleaved_rtcp_, rtp_relay_buf_, n);
+                send_interleaved_downstream(ds_interleaved_rtcp_, buf.get(), n);
             }
             else if (client_rtcp_addr_.sin_port != 0)
             {
-                sendto(rtcp_ds_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtcp_ds_fd_, buf.get(), n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
             }
         }
+        pool_.release(std::move(buf));
     }
 }
 
@@ -737,16 +753,14 @@ void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t 
 {
     if (closed_ || downstream_fd_ < 0) return;
 
-    // Prepend $ <channel> <length>
-    std::string pkg;
-    pkg.reserve(4 + len);
-    pkg.push_back('$');
-    pkg.push_back(static_cast<char>(channel));
+    auto buf = pool_.acquire();
+    buf[0] = '$';
+    buf[1] = static_cast<uint8_t>(channel);
     uint16_t nlen = htons(static_cast<uint16_t>(len));
-    pkg.append(reinterpret_cast<const char*>(&nlen), 2);
-    pkg.append(reinterpret_cast<const char*>(data), len);
+    memcpy(buf.get() + 2, &nlen, 2);
+    memcpy(buf.get() + 4, data, len);
 
-    to_downstream_q_.push_back(std::move(pkg));
+    to_downstream_q_.push_back(Packet{std::move(buf), len + 4, 0});
     
     // We need to trigger EPOLLOUT to drain the queue
     loop_->set(downstream_ctx_.get(), downstream_fd_,
@@ -800,10 +814,13 @@ void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtp_ds_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+        auto buf = pool_.acquire();
+        ssize_t n = recvfrom(rtp_ds_fd_, buf.get(), pool_.get_buffer_size(), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0)
+        if (n <= 0) {
+            pool_.release(std::move(buf));
             break;
+        }
 
         // Packet from downstream client -> send to upstream server
         if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
@@ -814,10 +831,11 @@ void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
 
             if (server_rtp_addr_.sin_port != 0)
             {
-                sendto(rtp_us_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
             }
         }
+        pool_.release(std::move(buf));
     }
 }
 
@@ -827,10 +845,13 @@ void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/)
     {
         sockaddr_in src{};
         socklen_t slen = sizeof(src);
-        ssize_t n = recvfrom(rtcp_ds_fd_, rtp_relay_buf_, sizeof(rtp_relay_buf_), 0,
+        auto buf = pool_.acquire();
+        ssize_t n = recvfrom(rtcp_ds_fd_, buf.get(), pool_.get_buffer_size(), 0,
                              (sockaddr *)&src, &slen);
-        if (n <= 0)
+        if (n <= 0) {
+            pool_.release(std::move(buf));
             break;
+        }
 
         // Packet from downstream client -> send to upstream server
         if (src.sin_addr.s_addr == client_addr_.sin_addr.s_addr)
@@ -841,10 +862,11 @@ void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/)
 
             if (server_rtcp_addr_.sin_port != 0)
             {
-                sendto(rtcp_us_fd_, rtp_relay_buf_, n, 0,
+                sendto(rtcp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
             }
         }
+        pool_.release(std::move(buf));
     }
 }
 
@@ -986,17 +1008,17 @@ void RTSPMitmClient::on_downstream_writable()
 {
     while (!to_downstream_q_.empty())
     {
-        auto &msg = to_downstream_q_.front();
+        auto &packet = to_downstream_q_.front();
         ssize_t n = send(downstream_fd_,
-                         msg.data() + downstream_send_offset_,
-                         msg.size() - downstream_send_offset_, 0);
+                         packet.data.get() + packet.offset,
+                         packet.length - packet.offset, 0);
         if (n > 0)
         {
-            downstream_send_offset_ += n;
-            if (downstream_send_offset_ == msg.size())
+            packet.offset += n;
+            if (packet.offset == packet.length)
             {
+                pool_.release(std::move(packet.data));
                 to_downstream_q_.pop_front();
-                downstream_send_offset_ = 0;
             }
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1221,7 +1243,10 @@ void RTSPMitmClient::on_upstream_readable()
             }
         }
 
-        to_downstream_q_.push_back(resp);
+        // Convert RTSP response string to Packet
+        auto buf = pool_.acquire();
+        memcpy(buf.get(), resp.data(), resp.size());
+        to_downstream_q_.push_back(Packet{std::move(buf), resp.size(), 0});
         loop_->set(downstream_ctx_.get(), downstream_fd_,
                    EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT | EPOLLIN);
     }

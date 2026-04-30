@@ -6,9 +6,81 @@
 #include "../include/buffer_pool.h"
 #include "../include/http_parser.h"
 #include "../include/server_config.h"
+#include "../include/3rd/json.hpp"
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string>
+
+using json = nlohmann::json;
+
+void send_json_response(int client_fd, const json &j)
+{
+    std::string body = j.dump();
+    std::string header = "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: application/json\r\n"
+                         "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                         "Access-Control-Allow-Origin: *\r\n"
+                         "Connection: close\r\n"
+                         "\r\n";
+    send(client_fd, header.c_str(), header.size(), 0);
+    send(client_fd, body.c_str(), body.size(), 0);
+    close(client_fd);
+}
+
+std::string get_mime_type(const std::string &path)
+{
+    if (path.find(".html") != std::string::npos) return "text/html";
+    if (path.find(".css") != std::string::npos) return "text/css";
+    if (path.find(".js") != std::string::npos) return "application/javascript";
+    return "text/plain";
+}
+
+void serve_admin_file(int client_fd, std::string path)
+{
+    // Strip query parameters
+    size_t qpos = path.find('?');
+    std::string clean_path = (qpos != std::string::npos) ? path.substr(0, qpos) : path;
+
+    if (clean_path == "/admin")
+    {
+        std::string response = "HTTP/1.1 301 Moved Permanently\r\n"
+                               "Location: /admin/\r\n"
+                               "Content-Length: 0\r\n"
+                               "Connection: close\r\n"
+                               "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+        close(client_fd);
+        return;
+    }
+
+    if (clean_path == "/admin/") clean_path = "/admin/index.html";
+    
+    // Replace /admin with webui
+    std::string local_path = "webui" + clean_path.substr(6);
+    
+    std::ifstream ifs(local_path);
+    if (!ifs.is_open())
+    {
+        Logger::error("[SERVER] Admin file not found: " + local_path);
+        std::string response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+        close(client_fd);
+        return;
+    }
+    
+    std::stringstream ss;
+    ss << ifs.rdbuf();
+    std::string content = ss.str();
+    
+    std::string header = "HTTP/1.1 200 OK\r\n"
+                         "Content-Type: " + get_mime_type(local_path) + "\r\n"
+                         "Content-Length: " + std::to_string(content.size()) + "\r\n"
+                         "Connection: close\r\n"
+                         "\r\n";
+    send(client_fd, header.c_str(), header.size(), 0);
+    send(client_fd, content.c_str(), content.size(), 0);
+    close(client_fd);
+}
 
 void send_unauthorized(int client_fd)
 {
@@ -118,6 +190,34 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
             send_unauthorized(client_fd);
             return;
         }
+    }
+
+    if (url == "/api/status")
+    {
+        json status;
+        status["pool"]["available"] = pool.get_available_count();
+        status["pool"]["allocated"] = pool.get_total_allocated();
+        status["pool"]["used"] = pool.get_total_allocated() - pool.get_available_count();
+        status["pool"]["peak"] = pool.get_peak_used();
+        status["pool"]["buffer_size"] = pool.get_buffer_size();
+        status["pool"]["total_bytes"] = pool.get_total_allocated() * pool.get_buffer_size();
+        
+        send_json_response(client_fd, status);
+        return;
+    }
+
+    if (url.find("/admin") == 0)
+    {
+        serve_admin_file(client_fd, url);
+        return;
+    }
+
+    if (url == "/favicon.ico")
+    {
+        std::string resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        send(client_fd, resp.c_str(), resp.size(), 0);
+        close(client_fd);
+        return;
     }
 
     std::string rtsp_url;

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTProxy Memory Pool Status</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="icon">M</span>
+                <h1>MEM-POOL <span>v1.0</span></h1>
+            </div>
+            <div class="status-badge" id="server-status">
+                <span class="dot"></span> ONLINE
+            </div>
+        </header>
+
+        <main>
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <h3>Available Buffers</h3>
+                    <div class="value" id="available-count">0</div>
+                    <div class="sub">Free and ready to use</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Used Buffers</h3>
+                    <div class="value" id="used-count">0</div>
+                    <div class="sub" id="used-percent">0% occupancy (Peak: 0)</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Allocated</h3>
+                    <div class="value" id="total-count">0</div>
+                    <div class="sub">Dynamic pool size</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Memory</h3>
+                    <div class="value" id="total-memory">0 MB</div>
+                    <div class="sub" id="buffer-size-info">Size: 0 KB each</div>
+                </div>
+            </section>
+
+            <section class="visualization">
+                <div class="card-header">
+                    <h2>Buffer Allocation Map</h2>
+                    <div class="legend">
+                        <span class="item used"><span class="box"></span> Used</span>
+                        <span class="item free"><span class="box"></span> Free</span>
+                    </div>
+                </div>
+                <div class="buffer-grid" id="buffer-grid">
+                    <!-- Blocks will be injected here -->
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <div class="update-info">
+                Auto-refreshing every 2s | <span id="last-update">Never</span>
+            </div>
+        </footer >
+    </div>
+    <script src="main.js"></script>
+</body>
+</html>

@@ -13,7 +13,7 @@
 #include <memory>
 
 class EpollLoop;
-class BufferPool;
+#include "../include/buffer_pool.h"
 class SocketCtx;
 
 /**
@@ -203,7 +203,7 @@ private:
 
     // Send queues (raw RTSP text)
     std::deque<std::string> to_upstream_q_;
-    std::deque<std::string> to_downstream_q_;
+    std::deque<Packet> to_downstream_q_;
 
     // TCP send progress for simple head-of-queue item
     size_t upstream_send_offset_{0};
@@ -227,6 +227,4 @@ private:
     uint16_t nat_wan_port_us_{0};
     std::string pending_setup_req_;
 
-    // High-speed relay buffer (64KB) to prevent truncation and allow immediate forwarding
-    uint8_t rtp_relay_buf_[65536];
 };
