@@ -29,6 +29,7 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
 {
     start_time_ = std::chrono::steady_clock::now();
     ctx.rtsp_url = rtsp_url;
+    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
 
     loop->remove(client_fd);
 
@@ -347,7 +348,7 @@ void RTSPClient::on_rtsp_readable()
                 else if (current_request_.method == RtspMethod::PLAY)
                 {
                     Logger::debug(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
-                    wait_for_keyframe_ = true;
+                    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
                     init_timer_fd();
                     state_ = RtspState::STREAMING;
                 }

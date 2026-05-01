@@ -88,6 +88,10 @@
 *   **自动剥离空包**：识别并丢弃 MPEG-TS 流中 PID 为 `0x1FFF` 的 Null Packets。
 *   **带宽节省**：通常可降低 10%-30% 的下游带宽需求，显著减少网络卡顿。
 *   **低延迟**：采用原地内存压缩算法，几乎不增加额外延迟。
+*   **起播优化**：默认开启关键帧等待（Wait for Keyframe），防止起播瞬间绿屏。
+
+> [!TIP]
+> **起播绿屏控制**：如果你使用的播放器自带快速找帧功能，可以使用 `--no-wait-keyframe` 禁用代理端的等待逻辑以获得更快的首屏速度。
 
 > [!NOTE]
 > 环回检测是内置的：即使未配置黑名单，代理也会自动拒绝指向其自身监听地址的递归请求。
@@ -101,8 +105,8 @@ Options:
   -p, --port            <port>  设置代理主端口 (默认: 8554)
   -n, --enable-nat              开启 NAT 穿越
       --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
-  -r, --rtp-buffer-size <count> 设置 BufferPool 块数量 (默认: 8192)
-  -u, --udp-packet-size <size>  设置 BufferPool 块大小 (默认: 2048)
+  -c, --buffer-pool-count <count> 设置 BufferPool 块数量 (默认: 8192)
+  -s, --buffer-pool-block-size <size> 设置 BufferPool 块大小 (默认: 2048)
   -t, --auth-token      <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口
@@ -117,6 +121,7 @@ Options:
       --log-lines       <count> 设置日志滚动行数 (默认: 10000)
       --log-level       <level> 设置日志等级: error, warn, info, debug (默认: info)
       --strip-padding           开启 MPEG-TS 空包剥离 (带宽优化)
+      --no-wait-keyframe        关闭起播关键帧等待 (降低首屏延迟，但可能导致初始绿屏)
 ```
 
 ## NAT 穿越与打洞功能
@@ -222,4 +227,8 @@ wget -qO- https://raw.githubusercontent.com/plsy1/rtsproxy/main/install.sh | sh
 *   **UCI 配置**: `/etc/config/rtsproxy`
 *   **规则配置**: `/etc/rtsproxy/config.json`
 *   **启动脚本**: `/etc/init.d/rtsproxy`
+
+> [!IMPORTANT]
+> **专家模式 (Expert Mode)**：
+> 在 OpenWrt 中，你可以开启 `use_external_config` 选项。开启后，程序将**完全忽略** UCI 的参数，直接读取 `/etc/rtsproxy/config.json` 中的设置。这对于需要进行复杂 URL 重写或精细化配置的用户非常有用。
 

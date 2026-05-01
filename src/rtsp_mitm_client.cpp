@@ -66,6 +66,7 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
     // Remove the simple EPOLLIN watch that was set by the accept handler;
     // we will re-register it ourselves.
     loop_->remove(client_fd);
+    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
 
     // Peek at the first bytes to extract the RTSP URL from the request line.
     // The first request was already recv'd and passed in as first_request.
@@ -1331,7 +1332,7 @@ void RTSPMitmClient::on_upstream_readable()
             if (state_ != State::STREAMING)
             {
                 state_ = State::STREAMING;
-                wait_for_keyframe_ = true;
+                wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
                 Logger::debug("[MITM] Streaming started: " + ctx_.rtsp_url +
                              " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) +
                              ":" + std::to_string(ntohs(client_addr_.sin_port)));

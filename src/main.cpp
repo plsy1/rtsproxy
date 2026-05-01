@@ -56,8 +56,8 @@ int main(int argc, char *argv[])
             {"port", required_argument, nullptr, 'p'},
             {"enable-nat", no_argument, nullptr, 'n'},
             {"nat-method", required_argument, nullptr, 0},
-            {"rtp-buffer-size", required_argument, nullptr, 'r'},
-            {"udp-packet-size", required_argument, nullptr, 'u'},
+            {"buffer-pool-count", required_argument, nullptr, 'c'},
+            {"buffer-pool-block-size", required_argument, nullptr, 's'},
             {"auth-token", required_argument, nullptr, 't'},
             {"http-interface", required_argument, nullptr, 0},
             {"mitm-interface", required_argument, nullptr, 0},
@@ -72,12 +72,30 @@ int main(int argc, char *argv[])
             {"log-lines", required_argument, nullptr, 0},
             {"log-level", required_argument, nullptr, 0},
             {"strip-padding", no_argument, nullptr, 0},
+            {"no-wait-keyframe", no_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
+    // 1. Initial scan for -j or --json-path to determine the config file location
+    int temp_opt;
+    int temp_longindex = -1;
+    while ((temp_opt = getopt_long(argc, argv, "p:nc:s:t:j:l:kdw", long_options, &temp_longindex)) != -1)
+    {
+        if (temp_opt == 'j') {
+            ServerConfig::setJsonPath(optarg);
+        } else if (temp_opt == 0 && temp_longindex >= 0 && strcmp(long_options[temp_longindex].name, "json-path") == 0) {
+            ServerConfig::setJsonPath(optarg);
+        }
+    }
+    // Reset getopt to parse again
+    optind = 1;
+
+    // 2. Load settings from config file (if it exists)
+    httpParser::load_json(ServerConfig::getJsonPath());
+
+    // 3. Parse all arguments (command line overrides config file)
     int opt;
     int longindex = -1;
-    bool use_watchdog = false;
-    while ((opt = getopt_long(argc, argv, "p:nr:u:t:j:l:kdw", long_options, &longindex)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nc:s:t:j:l:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -85,12 +103,12 @@ int main(int argc, char *argv[])
             ServerConfig::setPort(std::atoi(optarg));
             break;
         case 'n':
-            ServerConfig::enableNat();
+            ServerConfig::setNatEnabled(true);
             break;
-        case 'r':
+        case 'c':
             ServerConfig::setBufferPoolCount(std::atoi(optarg));
             break;
-        case 'u':
+        case 's':
             ServerConfig::setBufferPoolBlockSize(std::atoi(optarg));
             break;
         case 't':
@@ -106,20 +124,16 @@ int main(int argc, char *argv[])
             ServerConfig::kill_previous_instance();
             return 0;
         case 'd':
-            if (daemon(0, 0) == -1)
-            {
-                Logger::error("[SERVER] Failed to daemonize the process");
-                return -1;
-            }
-            Logger::info("[SERVER] Running in daemon mode");
+            ServerConfig::setDaemonEnabled(true);
             break;
         case 'w':
-            use_watchdog = true;
+            ServerConfig::setWatchdogEnabled(true);
             break;
         case 0:
             if (longindex >= 0 && strcmp(long_options[longindex].name, "nat-method") == 0)
             {
                 ServerConfig::setNatMethod(optarg);
+                ServerConfig::setNatEnabled(true);
             }
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
             {
@@ -158,6 +172,11 @@ int main(int argc, char *argv[])
                 ServerConfig::setStripPadding(true);
                 Logger::info("[CONFIG] Padding stripping enabled");
             }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "no-wait-keyframe") == 0)
+            {
+                ServerConfig::setWaitKeyframe(false);
+                Logger::info("[CONFIG] Wait for keyframe disabled");
+            }
             break;
         default:
             ServerConfig::printUsage(argv[0]);
@@ -169,7 +188,18 @@ int main(int argc, char *argv[])
         Logger::setLogFile(ServerConfig::getLogFile(), ServerConfig::getLogLines());
     }
 
-    if (use_watchdog)
+    // 3. Execution of process management (Daemon / Watchdog)
+    if (ServerConfig::isDaemonEnabled())
+    {
+        if (daemon(1, 0) != 0)
+        {
+            Logger::error("[SERVER] Failed to daemonize");
+            return EXIT_FAILURE;
+        }
+        Logger::info("[SERVER] Running in daemon mode");
+    }
+
+    if (ServerConfig::isWatchdogEnabled())
     {
         Logger::info("[SUPERVISOR] Starting in watchdog mode");
         Logger::flush();
@@ -225,7 +255,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    httpParser::load_json(ServerConfig::getJsonPath());
+    // Already loaded at the beginning
 
     EpollLoop loop;
     BufferPool pool(ServerConfig::getBufferPoolBlockSize(), ServerConfig::getBufferPoolCount());

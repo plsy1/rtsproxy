@@ -21,6 +21,9 @@ std::string ServerConfig::listen_interface = "";
 std::string ServerConfig::log_file_path = "";
 size_t ServerConfig::log_file_lines = 10000;
 bool ServerConfig::strip_padding = false;
+bool ServerConfig::wait_keyframe = true;
+bool ServerConfig::watchdog_enabled = false;
+bool ServerConfig::daemon_enabled = false;
 std::vector<std::string> ServerConfig::blacklist = {};
 
 void ServerConfig::setPort(int p)
@@ -28,17 +31,19 @@ void ServerConfig::setPort(int p)
     port = p;
 }
 
-void ServerConfig::enableNat()
+void ServerConfig::setNatEnabled(bool enable)
 {
-    enable_nat = true;
-    Logger::info("[CONFIG] NAT traversal enabled");
+    enable_nat = enable;
+    if (enable) {
+        Logger::info("[CONFIG] NAT traversal ENABLED (Method: " + nat_method + ")");
+    } else {
+        Logger::info("[CONFIG] NAT traversal DISABLED");
+    }
 }
 
 void ServerConfig::setNatMethod(const std::string &method)
 {
     nat_method = method;
-    enable_nat = true;
-    Logger::info("[CONFIG] NAT method set to: " + method);
 }
 
 void ServerConfig::setBufferPoolCount(int count)
@@ -102,6 +107,18 @@ void ServerConfig::setBlacklist(const std::vector<std::string> &list)
 void ServerConfig::setStripPadding(bool enable)
 {
     strip_padding = enable;
+}
+void ServerConfig::setWaitKeyframe(bool enable)
+{
+    wait_keyframe = enable;
+}
+void ServerConfig::setWatchdogEnabled(bool enable)
+{
+    watchdog_enabled = enable;
+}
+void ServerConfig::setDaemonEnabled(bool enable)
+{
+    daemon_enabled = enable;
 }
 
 int ServerConfig::getPort()
@@ -182,6 +199,18 @@ bool ServerConfig::isStripPadding()
 {
     return strip_padding;
 }
+bool ServerConfig::isWaitKeyframe()
+{
+    return wait_keyframe;
+}
+bool ServerConfig::isWatchdogEnabled()
+{
+    return watchdog_enabled;
+}
+bool ServerConfig::isDaemonEnabled()
+{
+    return daemon_enabled;
+}
 
 void ServerConfig::printUsage(const std::string &program_name)
 {
@@ -190,8 +219,8 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -p, --port            <port>  Set HTTP server port (default: " << port << ")" << std::endl;
     std::cout << "  -n, --enable-nat              Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
     std::cout << "      --nat-method      <method> Set NAT method: stun, zte (default: " << nat_method << ")" << std::endl;
-    std::cout << "  -r, --rtp-buffer-size <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
-    std::cout << "  -u, --udp-packet-size <size>  Set BufferPool block size (default: " << buffer_pool_block_size << ")" << std::endl;
+    std::cout << "  -c, --buffer-pool-count <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
+    std::cout << "  -s, --buffer-pool-block-size <size>  Set BufferPool block size (default: " << buffer_pool_block_size << ")" << std::endl;
     std::cout << "  -t, --auth-token      <token> Set auth token for HTTP API and RTSP access (default: none)" << std::endl;
     std::cout << "      --http-interface  <iface> Set HTTP mode upstream interface" << std::endl;
     std::cout << "      --mitm-interface  <iface> Set MITM mode upstream interface" << std::endl;

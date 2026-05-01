@@ -7,9 +7,11 @@ class ServerConfig
 {
 public:
     static void setPort(int p);
-    static void enableNat();
+    static void setNatEnabled(bool enable);
     static void setBufferPoolCount(int count);
     static void setBufferPoolBlockSize(int size);
+    static void setRtpBufferSize(int count) { setBufferPoolCount(count); }
+    static void setUdpPacketSize(int size) { setBufferPoolBlockSize(size); }
     static void setStunPort(int port);
     static void setStunHost(std::string host);
     static void setNatMethod(const std::string &method);
@@ -22,6 +24,11 @@ public:
     static void setLogLines(size_t lines);
     static void setBlacklist(const std::vector<std::string> &list);
     static void setStripPadding(bool enable);
+    static void setWaitKeyframe(bool enable);
+    static void setWatchdogEnabled(bool enable);
+    static void setDaemonEnabled(bool enable);
+    static void setAuthToken(std::string token) { setToken(token); }
+    static void setLogFileLines(size_t lines) { setLogLines(lines); }
 
     static bool isNatEnabled();
     static std::string getNatMethod();
@@ -38,6 +45,9 @@ public:
     static std::string getLogFile();
     static size_t getLogLines();
     static bool isStripPadding();
+    static bool isWaitKeyframe();
+    static bool isWatchdogEnabled();
+    static bool isDaemonEnabled();
     static const std::vector<std::string>& getBlacklist();
     static void printUsage(const std::string &program_name);
 
@@ -59,5 +69,8 @@ private:
     static std::string log_file_path;
     static size_t log_file_lines;
     static bool strip_padding;
+    static bool wait_keyframe;
+    static bool watchdog_enabled;
+    static bool daemon_enabled;
     static std::vector<std::string> blacklist;
 };

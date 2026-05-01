@@ -22,6 +22,9 @@ start_service() {
 	local log_lines
 	local log_level
 	local nat_method
+	local strip_padding
+	local wait_keyframe
+	local use_external_config
 
 	config_load "$CONF"
 	config_get_bool enabled "main" "enabled" 0
@@ -41,24 +44,33 @@ start_service() {
 	config_get log_file "main" "log_file" ""
 	config_get log_lines "main" "log_lines" "10000"
 	config_get log_level "main" "log_level" "info"
+	config_get_bool strip_padding "main" "strip_padding" 1
+	config_get_bool wait_keyframe "main" "wait_keyframe" 1
+	config_get_bool use_external_config "main" "use_external_config" 0
 
 	procd_open_instance
 	procd_set_param command "$PROG"
-	procd_append_param command -p "$port"
-	procd_append_param command -r "$buffer_pool_count"
-	procd_append_param command -u "$buffer_pool_block_size"
 	procd_append_param command -j "$json_path"
+
+	if [ "$use_external_config" -eq 0 ]; then
+		# Normal mode: UCI overrides JSON
+		procd_append_param command -p "$port"
+		procd_append_param command -r "$buffer_pool_count"
+		procd_append_param command -u "$buffer_pool_block_size"
+		[ "$enable_nat" -eq 1 ] && procd_append_param command -n
+		[ "$enable_nat" -eq 1 ] && procd_append_param command --nat-method "$nat_method"
+		[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
+		[ -n "$http_interface" ] && procd_append_param command --http-interface "$http_interface"
+		[ -n "$mitm_interface" ] && procd_append_param command --mitm-interface "$mitm_interface"
+		[ -n "$listen_interface" ] && procd_append_param command -l "$listen_interface"
+		[ -n "$log_file" ] && procd_append_param command --log-file "$log_file"
+		[ -n "$log_lines" ] && procd_append_param command --log-lines "$log_lines"
+		[ -n "$log_level" ] && procd_append_param command --log-level "$log_level"
+		[ "$strip_padding" -eq 1 ] && procd_append_param command --strip-padding
+		[ "$wait_keyframe" -eq 0 ] && procd_append_param command --no-wait-keyframe
+	fi
 	
-	[ "$enable_nat" -eq 1 ] && procd_append_param command -n
-	[ "$enable_nat" -eq 1 ] && procd_append_param command --nat-method "$nat_method"
-	[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
-	[ -n "$http_interface" ] && procd_append_param command --http-interface "$http_interface"
-	[ -n "$mitm_interface" ] && procd_append_param command --mitm-interface "$mitm_interface"
-	[ -n "$listen_interface" ] && procd_append_param command -l "$listen_interface"
 	[ "$watchdog" -eq 1 ] && procd_append_param command -w
-	[ -n "$log_file" ] && procd_append_param command --log-file "$log_file"
-	[ -n "$log_lines" ] && procd_append_param command --log-lines "$log_lines"
-	[ -n "$log_level" ] && procd_append_param command --log-level "$log_level"
 
 	# Run in background via procd
 	procd_set_param respawn
