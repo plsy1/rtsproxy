@@ -36,6 +36,7 @@ struct rtspCtx
     std::string server_ip;
     std::string path;
     std::string rtsp_url;
+    std::string content_base;
 
     sdpCtx sdp;
 

@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <sstream>
+#include <algorithm>
+#include <cctype>
 
 rtspParser::rtspParser() {}
 rtspParser::~rtspParser() {}
@@ -229,4 +231,23 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     ctx.path = (slash != std::string::npos) ? url.substr(slash) : "/";
 
     return 0;
+}
+
+std::string rtspParser::extract_header_value(const std::string &msg, const std::string &header_name)
+{
+    std::string lower_msg = msg;
+    std::string lower_hdr = header_name;
+    std::transform(lower_msg.begin(), lower_msg.end(), lower_msg.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::transform(lower_hdr.begin(), lower_hdr.end(), lower_hdr.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    size_t pos = lower_msg.find(lower_hdr + ":");
+    if (pos == std::string::npos)
+        return {};
+    pos += header_name.size() + 1;
+    while (pos < msg.size() && (msg[pos] == ' ' || msg[pos] == '\t'))
+        ++pos;
+    size_t end = msg.find("\r\n", pos);
+    if (end == std::string::npos)
+        return msg.substr(pos);
+    return msg.substr(pos, end - pos);
 }

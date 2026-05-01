@@ -23,24 +23,6 @@
 /* Helpers                                                                    */
 /* ========================================================================= */
 
-static std::string extract_header_value(const std::string &msg,
-                                        const std::string &header_name)
-{
-    // Search case-insensitively for "Header-Name:"
-    std::string lower_msg = msg;
-    std::string lower_hdr = header_name;
-    std::transform(lower_msg.begin(), lower_msg.end(), lower_msg.begin(), ::tolower);
-    std::transform(lower_hdr.begin(), lower_hdr.end(), lower_hdr.begin(), ::tolower);
-
-    size_t pos = lower_msg.find(lower_hdr + ":");
-    if (pos == std::string::npos)
-        return {};
-    pos += header_name.size() + 1;
-    while (pos < msg.size() && (msg[pos] == ' ' || msg[pos] == '\t'))
-        ++pos;
-    size_t end = msg.find("\r\n", pos);
-    return msg.substr(pos, end - pos);
-}
 
 static std::string replace_header(const std::string &msg,
                                   const std::string &header_name,
@@ -244,7 +226,7 @@ void RTSPMitmClient::connect_upstream()
 bool RTSPMitmClient::extract_client_port(const std::string &req,
                                          uint16_t &rtp_port, uint16_t &rtcp_port)
 {
-    std::string transport = extract_header_value(req, "Transport");
+    std::string transport = rtspParser::extract_header_value(req, "Transport");
     if (transport.empty())
         return false;
 
@@ -262,7 +244,7 @@ bool RTSPMitmClient::extract_client_port(const std::string &req,
 bool RTSPMitmClient::extract_interleaved_channels(const std::string &req,
                                                  uint8_t &rtp_chan, uint8_t &rtcp_chan)
 {
-    std::string transport = extract_header_value(req, "Transport");
+    std::string transport = rtspParser::extract_header_value(req, "Transport");
     if (transport.empty())
         return false;
 
@@ -358,7 +340,7 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
     uint16_t proxy_port = ntohs(local_addr.sin_port);
 
     // 1. Rewrite Transport header (if present)
-    std::string transport = extract_header_value(result, "Transport");
+    std::string transport = rtspParser::extract_header_value(result, "Transport");
     if (!transport.empty())
     {
         Logger::debug("[MITM] Original Transport: " + transport);
@@ -452,7 +434,7 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
     std::regex uri_re(upstream_pattern);
     
     auto patch_uri_header = [&](const std::string& h_name) {
-        std::string val = extract_header_value(result, h_name);
+        std::string val = rtspParser::extract_header_value(result, h_name);
         if (!val.empty()) {
             std::smatch m;
             if (std::regex_search(val, m, uri_re)) {
@@ -494,7 +476,7 @@ std::string RTSPMitmClient::patch_response_for_client(const std::string &resp)
 std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
 {
     // Replace client_port=X-Y with our local relay port pair.
-    std::string transport = extract_header_value(req, "Transport");
+    std::string transport = rtspParser::extract_header_value(req, "Transport");
     if (transport.empty())
         return req;
 
@@ -553,7 +535,7 @@ std::string RTSPMitmClient::patch_transport_for_upstream(const std::string &req)
 
 std::string RTSPMitmClient::patch_transport_for_upstream_tcp(const std::string &req)
 {
-    std::string transport = extract_header_value(req, "Transport");
+    std::string transport = rtspParser::extract_header_value(req, "Transport");
     if (transport.empty()) return req;
 
     // Force TCP interleaved mode for upstream
@@ -1183,7 +1165,7 @@ void RTSPMitmClient::on_upstream_readable()
 
         // A response may have a body (SDP). Read Content-Length.
         size_t body_len = 0;
-        std::string cl_val = extract_header_value(
+        std::string cl_val = rtspParser::extract_header_value(
             upstream_recv_buf_.substr(0, end + 4), "Content-Length");
         if (!cl_val.empty())
         {

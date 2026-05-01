@@ -32,6 +32,7 @@ public:
     static int parse_session_id(const std::string &resp, rtspCtx &ctx);
     static int parse_url(const std::string &url, rtspCtx &ctx);
     static int get_content_length(const std::string &resp);
+    static std::string extract_header_value(const std::string &msg, const std::string &header_name);
 
 private:
 };

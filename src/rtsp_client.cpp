@@ -239,6 +239,18 @@ void RTSPClient::on_rtsp_readable()
                 rtspParser::parse_session_id(header, ctx);
                 int status = rtspParser::parse_status_code(header);
 
+                if (status == -1)
+                {
+                    std::string cseq = rtspParser::extract_header_value(header, "CSeq");
+                    if (!cseq.empty())
+                    {
+                        Logger::debug("[RTSP] Received request from server, responding with 200 OK (CSeq: " + cseq + ")");
+                        std::string resp = "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\n\r\n";
+                        send(rtsp_fd_, resp.data(), resp.size(), 0);
+                        continue;
+                    }
+                }
+
                 if (status == 461 && current_request_.method == RtspMethod::SETUP && !setup_retry_with_tcp_)
                 {
                     Logger::warn("[RTSP] Upstream rejected UDP SETUP (461). Retrying with TCP Interleaved...");
@@ -249,7 +261,7 @@ void RTSPClient::on_rtsp_readable()
 
                 if (status != 200)
                 {
-                    Logger::error("[RTSP] Connection to upstream refused. Status: " + std::to_string(status));
+                    Logger::error("[RTSP] Connection to upstream refused. Status: " + std::to_string(status) + ", Header: " + header);
                     on_closed_callback_();
                     return;
                 }
@@ -260,6 +272,7 @@ void RTSPClient::on_rtsp_readable()
                 }
                 else if (current_request_.method == RtspMethod::DESCRIBE)
                 {
+                    ctx.content_base = rtspParser::extract_header_value(header, "Content-Base");
                     send_rtsp_setup(body);
                 }
                 else if (current_request_.method == RtspMethod::SETUP)
@@ -765,7 +778,22 @@ void RTSPClient::send_rtsp_setup(const std::string &sdp_data)
         Logger::debug("[RTSP] SETUP with client port: " + std::to_string(port1) + "-" + std::to_string(port2));
     }
 
-    std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path + "/" + track;
+    std::string base_url;
+    if (!ctx.content_base.empty()) {
+        base_url = ctx.content_base;
+    } else {
+        base_url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
+        size_t query_pos = base_url.find('?');
+        if (query_pos != std::string::npos) {
+            base_url = base_url.substr(0, query_pos);
+        }
+    }
+
+    if (!base_url.empty() && base_url.back() != '/' && !track.empty() && track[0] != '*') {
+        base_url += "/";
+    }
+    
+    std::string url = base_url + track;
     push_request_into_queue(RtspMethod::SETUP, url, header, "");
 
     build_and_send_request();
@@ -773,15 +801,25 @@ void RTSPClient::send_rtsp_setup(const std::string &sdp_data)
 
 void RTSPClient::send_rtsp_play()
 {
+    std::string base_url;
+    if (!ctx.content_base.empty()) {
+        base_url = ctx.content_base;
+    } else {
+        base_url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
+    }
+
     std::string header = "Range: npt=0.000-\r\n";
     if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
-        header = "Range: clock=end-\r\n";
+        // Only use clock=end- for live streams (usually no query params like tvdr)
+        if (ctx.path.find('?') == std::string::npos) {
+            header = "Range: clock=end-\r\n";
+        }
         header += "User-Agent: HMTL RTSP 1.0; CTC/2.0\r\n";
         header += "x-BurstSize: 1048576\r\n";
         header += "Scale: 1.0\r\n";
     }
-    std::string url = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
-    push_request_into_queue(RtspMethod::PLAY, url, header);
+    
+    push_request_into_queue(RtspMethod::PLAY, base_url, header);
     build_and_send_request();
 }
 
