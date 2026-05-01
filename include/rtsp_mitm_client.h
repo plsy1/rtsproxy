@@ -231,6 +231,7 @@ private:
     std::string ds_transport_protocol_;
     uint16_t nat_wan_port_us_{0};
     std::string pending_setup_req_;
+    bool wait_for_keyframe_{true};
 
     mutable BandwidthEstimator upstream_est_;
     mutable BandwidthEstimator downstream_est_;

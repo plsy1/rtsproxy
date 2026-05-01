@@ -141,6 +141,7 @@ private:
     uint16_t rtp_port_;
     uint16_t nat_wan_port = 0;
     bool is_init_ok = false;
+    bool wait_for_keyframe_{true};
 
     size_t tcp_send_offset_ = 0;
     size_t payload_offset = 0;

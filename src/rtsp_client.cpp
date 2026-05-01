@@ -347,6 +347,7 @@ void RTSPClient::on_rtsp_readable()
                 else if (current_request_.method == RtspMethod::PLAY)
                 {
                     Logger::debug(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
+                    wait_for_keyframe_ = true;
                     init_timer_fd();
                     state_ = RtspState::STREAMING;
                 }
@@ -392,6 +393,29 @@ void RTSPClient::on_rtp_readable()
 
     if (get_rtp_payload_offset(buf.get(), recv_len, payload_offset))
     {
+        if (wait_for_keyframe_)
+        {
+            bool found = false;
+            if (recv_len - payload_offset >= 188 && buf[payload_offset] == 0x47)
+            {
+                for (size_t i = 0; payload_offset + i + 188 <= recv_len; i += 188)
+                {
+                    uint8_t *ts = buf.get() + payload_offset + i;
+                    uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
+                    if (pid == 0) { found = true; break; }
+                    uint8_t afc = (ts[3] & 0x30) >> 4;
+                    if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) { found = true; break; }
+                }
+            }
+            if (found) {
+                Logger::debug("[RTSP] Keyframe/PAT found, start forwarding");
+                wait_for_keyframe_ = false;
+            } else {
+                buffer_pool_.release(std::move(buf));
+                return;
+            }
+        }
+
         if (send_queue_.size() > 512) {
             auto &old = send_queue_.front();
             if (old.data) buffer_pool_.release(std::move(old.data));
