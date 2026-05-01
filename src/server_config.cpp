@@ -174,11 +174,11 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "      --nat-method      <method> Set NAT method: stun, zte (default: " << nat_method << ")" << std::endl;
     std::cout << "  -r, --rtp-buffer-size <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
     std::cout << "  -u, --udp-packet-size <size>  Set BufferPool block size (default: " << buffer_pool_block_size << ")" << std::endl;
-    std::cout << "  -t, --set-auth-token  <token> Set auth token (default: " << "no auth required" << ")" << std::endl;
+    std::cout << "  -t, --auth-token      <token> Set auth token for HTTP API and RTSP access (default: none)" << std::endl;
     std::cout << "      --http-interface  <iface> Set HTTP mode upstream interface" << std::endl;
     std::cout << "      --mitm-interface  <iface> Set MITM mode upstream interface" << std::endl;
     std::cout << "  -l, --listen-interface <iface> Set interface to listen on" << std::endl;
-    std::cout << "  -j, --set-json-path   <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
+    std::cout << "  -j, --json-path       <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
     std::cout << "  -w, --watchdog                Run in watchdog mode (auto-restart on crash)" << std::endl;
     std::cout << "      --log-file        <path>  Write logs to a specific file instead of stdout" << std::endl;

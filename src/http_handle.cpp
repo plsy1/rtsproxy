@@ -89,9 +89,14 @@ void send_unauthorized(int client_fd)
 {
     std::string response = "HTTP/1.1 401 Unauthorized\r\n"
                            "Content-Type: text/html\r\n"
-                           "WWW-Authenticate: Basic realm=\"Restricted\"\r\n"
+                           "Connection: close\r\n"
                            "\r\n"
-                           "<html><body><h1>401 Unauthorized</h1></body></html>";
+                           "<html><head><title>401 Unauthorized</title></head>"
+                           "<body style=\"font-family:sans-serif;text-align:center;padding-top:50px;\">"
+                           "<h1>401 Unauthorized</h1>"
+                           "<p>Invalid or missing access token.</p>"
+                           "<p>Usage: <code>/admin/?token=YOUR_TOKEN</code></p>"
+                           "</body></html>";
     send(client_fd, response.c_str(), response.size(), 0);
     close(client_fd);
 }
@@ -174,11 +179,16 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         if (it != params.end())
         {
             token = it->second;
-            Logger::debug(token);
         }
     }
 
-    if (!ServerConfig::getToken().empty())
+    // Allow static assets to load without token as they don't contain sensitive data.
+    // This allows the WebUI to load its CSS/JS after the initial authorized index.html hit.
+    bool is_static_asset = (url.find(".js") != std::string::npos || 
+                            url.find(".css") != std::string::npos || 
+                            url.find(".ico") != std::string::npos);
+
+    if (!ServerConfig::getToken().empty() && !is_static_asset)
     {
         if (token.empty())
         {

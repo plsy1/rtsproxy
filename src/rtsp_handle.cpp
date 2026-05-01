@@ -3,10 +3,12 @@
 #include "../include/epoll_loop.h"
 #include "../include/logger.h"
 #include "../include/buffer_pool.h"
+#include "../include/server_config.h"
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string>
 #include <cstring>
+#include <sstream>
 
 void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
                          EpollLoop *loop, BufferPool &pool)
@@ -44,6 +46,39 @@ void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
         std::to_string(ntohs(client_addr.sin_port));
 
     Logger::debug("[RTSP-MITM] New RTSP client: " + client_host);
+
+    // Token authentication
+    if (!ServerConfig::getToken().empty())
+    {
+        std::istringstream ss(first_request);
+        std::string method, uri, version;
+        ss >> method >> uri >> version;
+
+        bool authorized = false;
+        size_t qpos = uri.find('?');
+        if (qpos != std::string::npos)
+        {
+            std::string query = uri.substr(qpos + 1);
+            // Search for token=YOUR_TOKEN in the query string
+            std::string target = "token=" + ServerConfig::getToken();
+            if (query.find(target) != std::string::npos)
+            {
+                authorized = true;
+            }
+        }
+
+        if (!authorized)
+        {
+            Logger::warn("[RTSP-MITM] Unauthorized RTSP request from " + client_host + " (Missing or invalid token)");
+            std::string response = "RTSP/1.0 401 Unauthorized\r\n"
+                                   "CSeq: 1\r\n"
+                                   "Content-Length: 0\r\n"
+                                   "\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
+            close(client_fd);
+            return;
+        }
+    }
 
     auto client = std::make_unique<RTSPMitmClient>(
         loop, pool, client_addr, client_fd, first_request);

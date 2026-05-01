@@ -24,9 +24,13 @@ return view.extend({
 		o.rmempty = false;
 
 		var port = uci.get('rtsproxy', 'main', 'port') || '8554';
+		var token = uci.get('rtsproxy', 'main', 'auth_token') || '';
+		var url = 'http://' + window.location.hostname + ':' + port + '/admin/';
+		if (token) url += '?token=' + token;
+
 		o = s.taboption('basic', form.DummyValue, '_webui', _('Management Dashboard'));
 		o.rawhtml = true;
-		o.default = '<a class="btn cbi-button cbi-button-apply" href="http://' + window.location.hostname + ':' + port + '/admin/" target="_blank" style="margin-top: 5px; display: inline-block;">' + _('Open WebUI') + '</a>';
+		o.default = '<a class="btn cbi-button cbi-button-apply" href="' + url + '" target="_blank" style="margin-top: 5px; display: inline-block;">' + _('Open WebUI') + '</a>';
 
 		o = s.taboption('basic', form.Value, 'port', _('Port'), _('Main listening port (default: 8554)'));
 		o.datatype = 'port';

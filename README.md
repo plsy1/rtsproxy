@@ -23,15 +23,21 @@
 客户端通过 HTTP 协议请求代理，代理将上游 RTSP 流转换为裸 TS 流通过 HTTP 返回。
 
 - **访问格式**：
-    - `http://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
-    - `http://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (支持规则重写)
+    - `http://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>[?token=xxx]`
+    - `http://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>[?token=xxx]` (支持规则重写)
 
 ### 2. RTSP MITM 模式
 客户端直接使用 RTSP 协议连接代理。代理透明转发所有信令，并对 RTP/RTCP 数据包进行双向中继。
 
 - **访问格式**：
-    - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>`
-    - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>` (同步支持 HTTP 模式的重写规则)
+    - `rtsp://<proxy-ip>:8554/rtp/<real-host>:<real-port>/<path>[?token=xxx]`
+    - `rtsp://<proxy-ip>:8554/tv/<real-host>:<real-port>/<path>[?token=xxx]` (同步支持 HTTP 模式的重写规则)
+
+### 3. 管理后台 (WebUI)
+通过浏览器访问内置的监控面板，实时查看会话状态和流量统计。
+
+- **访问格式**：
+    - `http://<proxy-ip>:8554/admin/[?token=xxx]`
 
 ---
 
@@ -69,13 +75,13 @@ Options:
       --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
   -r, --rtp-buffer-size <count> 设置 BufferPool 块数量 (默认: 8192)
   -u, --udp-packet-size <size>  设置 BufferPool 块大小 (默认: 2048)
-  -t, --set-auth-token  <token> 设置鉴权 Token (可选)
+  -t, --auth-token      <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口
       --mitm-interface  <iface> 设置 MITM 模式上游网口
       --set-stun-host   <host>  设置 STUN 服务器地址 (默认: stun.l.google.com)
       --set-stun-port   <port>  设置 STUN 服务器端口 (默认: 19302)
-  -j, --set-json-path   <path>  设置规则配置文件路径 (默认: config.json)
+  -j, --json-path       <path>  设置规则配置文件路径 (默认: config.json)
   -w, --watchdog                开启自动重启模式
   -d, --daemon                  后台运行
   -k, --kill                    杀死正在运行的实例
@@ -98,7 +104,11 @@ Options:
 * **用途**：适配中兴设备为客户端的 IPTV 运营商专网环境。
 
 > [!TIP]
-> **多接口支持**：现在你可以为 HTTP 模式和 MITM 模式分别指定上游网口（例如分别走两个不同的 IPTV 专网），并可以限定服务只在特定的本地网口（如 `br-lan`）监听。
+> **鉴权机制**：
+> 启用 `--auth-token` 后，所有的 HTTP API 调用、WebUI 访问以及 RTSP 初始连接均需在 URL 中附加 `token=你的Token` 参数。静态资源（JS/CSS）会自动放行以确保页面正常加载。
+
+> [!TIP]
+> **多接口支持**：现在你可以为 HTTP 模式 and MITM 模式分别指定上游网口（例如分别走两个不同的 IPTV 专网），并可以限定服务只在特定的本地网口（如 `br-lan`）监听。
 
 ---
 
