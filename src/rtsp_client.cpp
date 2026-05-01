@@ -11,6 +11,7 @@
 #include "../include/rtsp_parser.h"
 #include "../include/blacklist_checker.h"
 #include "../include/socket_helper.h"
+#include "../include/port_pool.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -90,6 +91,10 @@ RTSPClient::~RTSPClient()
         buffer_pool_.release(std::move(packet.data));
     }
     send_queue_.clear();
+
+    if (rtp_port_ != 0) {
+        PortPool::getInstance().release_pair(rtp_port_);
+    }
 }
 
 void RTSPClient::connect_server()
@@ -527,16 +532,9 @@ void RTSPClient::build_and_send_request()
 
 void RTSPClient::init_rtp_rtcp_sockets()
 {
-    if (bind_udp_socket_with_retry(rtp_fd_.get_ref(), rtp_port_, 3, ServerConfig::getHttpUpstreamInterface()) < 0)
+    if (bind_udp_pair_from_pool(rtp_fd_.get_ref(), rtcp_fd_.get_ref(), rtp_port_, ServerConfig::getHttpUpstreamInterface()) < 0)
     {
-        Logger::error("[RTP] Failed to bind RTP socket after multiple attempts");
-        if (on_closed_callback_) on_closed_callback_();
-        return;
-    }
-
-    if (bind_udp_socket(rtcp_fd_.get_ref(), rtp_port_ + 1, ServerConfig::getHttpUpstreamInterface()) < 0)
-    {
-        Logger::error("[RTP] Failed to bind RTCP socket");
+        Logger::error("[RTP] Failed to bind RTP/RTCP sockets from pool");
         if (on_closed_callback_) on_closed_callback_();
         return;
     }

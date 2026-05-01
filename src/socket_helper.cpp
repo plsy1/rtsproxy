@@ -3,11 +3,9 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <sys/timerfd.h>
-#include <algorithm>
 #include <unistd.h>
 #include <string>
 #include <random>
-#include <chrono>
 
 int create_listen_socket(int port, const std::string &iface)
 {
@@ -136,4 +134,34 @@ int bind_udp_socket(int &fd, const uint16_t &port, const std::string &iface = ""
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
         return -1;
     return 0;
+}
+
+#include "../include/port_pool.h"
+
+int bind_udp_pair_from_pool(int &rtp_fd, int &rtcp_fd, uint16_t &rtp_port, const std::string &iface)
+{
+    auto &pool = PortPool::getInstance();
+    
+    for (int i = 0; i < 10; ++i) // Try up to 10 pairs from pool
+    {
+        rtp_port = pool.acquire_pair();
+        if (rtp_port == 0) return -1;
+
+        if (bind_udp_socket(rtp_fd, rtp_port, iface) == 0)
+        {
+            if (bind_udp_socket(rtcp_fd, rtp_port + 1, iface) == 0)
+            {
+                return 0; // Success!
+            }
+            // RTCP failed, close RTP and mark port as occupied
+            close(rtp_fd);
+            rtp_fd = -1;
+            pool.mark_occupied(rtp_port + 1);
+        }
+        else
+        {
+            pool.mark_occupied(rtp_port);
+        }
+    }
+    return -1;
 }

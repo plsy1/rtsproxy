@@ -11,6 +11,7 @@
 #include "../include/blacklist_checker.h"
 #include "../include/socket_helper.h"
 #include "../include/stun_client.h"
+#include "../include/port_pool.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -199,6 +200,13 @@ RTSPMitmClient::~RTSPMitmClient()
         }
     }
     to_downstream_q_.clear();
+
+    if (local_rtp_us_port_ != 0) {
+        PortPool::getInstance().release_pair(local_rtp_us_port_);
+    }
+    if (local_rtp_ds_port_ != 0) {
+        PortPool::getInstance().release_pair(local_rtp_ds_port_);
+    }
 }
 
 void RTSPMitmClient::set_on_closed_callback(ClosedCallback cb)
@@ -272,32 +280,22 @@ bool RTSPMitmClient::extract_interleaved_channels(const std::string &req,
 bool RTSPMitmClient::init_relay_sockets()
 {
     // 1. Allocate UPSTREAM-facing sockets (bound to mitm interface)
-    if (bind_udp_socket_with_retry(rtp_us_fd_.get_ref(), local_rtp_us_port_, 5,
-                                   ServerConfig::getMitmUpstreamInterface()) < 0)
+    if (bind_udp_pair_from_pool(rtp_us_fd_.get_ref(), rtcp_us_fd_.get_ref(), 
+                                local_rtp_us_port_, ServerConfig::getMitmUpstreamInterface()) < 0)
     {
-        Logger::error("[MITM] Failed to bind upstream-facing RTP socket");
+        Logger::error("[MITM] Failed to bind upstream-facing UDP sockets");
         return false;
     }
     local_rtcp_us_port_ = local_rtp_us_port_ + 1;
-    if (bind_udp_socket(rtcp_us_fd_.get_ref(), local_rtcp_us_port_,
-                        ServerConfig::getMitmUpstreamInterface()) < 0)
-    {
-        Logger::error("[MITM] Failed to bind upstream-facing RTCP socket");
-        return false;
-    }
 
     // 2. Allocate DOWNSTREAM-facing sockets (NOT bound to mitm interface, uses default route)
-    if (bind_udp_socket_with_retry(rtp_ds_fd_.get_ref(), local_rtp_ds_port_, 5) < 0)
+    if (bind_udp_pair_from_pool(rtp_ds_fd_.get_ref(), rtcp_ds_fd_.get_ref(), 
+                                local_rtp_ds_port_) < 0)
     {
-        Logger::error("[MITM] Failed to bind downstream-facing RTP socket");
+        Logger::error("[MITM] Failed to bind downstream-facing UDP sockets");
         return false;
     }
     local_rtcp_ds_port_ = local_rtp_ds_port_ + 1;
-    if (bind_udp_socket(rtcp_ds_fd_.get_ref(), local_rtcp_ds_port_) < 0)
-    {
-        Logger::error("[MITM] Failed to bind downstream-facing RTCP socket");
-        return false;
-    }
 
     // Register all for EPOLLIN
     rtp_us_ctx_ = std::make_unique<SocketCtx>(
