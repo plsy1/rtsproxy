@@ -71,6 +71,7 @@ int main(int argc, char *argv[])
             {"log-file", required_argument, nullptr, 0},
             {"log-lines", required_argument, nullptr, 0},
             {"log-level", required_argument, nullptr, 0},
+            {"strip-padding", no_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     int opt;
@@ -151,6 +152,11 @@ int main(int argc, char *argv[])
                 else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
                 else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
                 else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
+            }
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "strip-padding") == 0)
+            {
+                ServerConfig::setStripPadding(true);
+                Logger::info("[CONFIG] Padding stripping enabled");
             }
             break;
         default:

@@ -170,4 +170,7 @@ private:
     RtspRequest current_request_;
     std::queue<RtspRequest> request_queue_;
     std::deque<Packet> send_queue_;
+
+    mutable BandwidthEstimator upstream_est_;
+    mutable BandwidthEstimator downstream_est_;
 };

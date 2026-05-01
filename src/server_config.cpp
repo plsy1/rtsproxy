@@ -20,6 +20,7 @@ std::string ServerConfig::mitm_upstream_interface = "";
 std::string ServerConfig::listen_interface = "";
 std::string ServerConfig::log_file_path = "";
 size_t ServerConfig::log_file_lines = 10000;
+bool ServerConfig::strip_padding = false;
 std::vector<std::string> ServerConfig::blacklist = {};
 
 void ServerConfig::setPort(int p)
@@ -98,6 +99,10 @@ void ServerConfig::setBlacklist(const std::vector<std::string> &list)
 {
     blacklist = list;
 }
+void ServerConfig::setStripPadding(bool enable)
+{
+    strip_padding = enable;
+}
 
 int ServerConfig::getPort()
 {
@@ -173,6 +178,10 @@ const std::vector<std::string>& ServerConfig::getBlacklist()
 {
     return blacklist;
 }
+bool ServerConfig::isStripPadding()
+{
+    return strip_padding;
+}
 
 void ServerConfig::printUsage(const std::string &program_name)
 {
@@ -196,6 +205,7 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
     std::cout << "      --set-stun-host   <host>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
     std::cout << "      --set-stun-port   <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
+    std::cout << "      --strip-padding           Strip RTP padding and TS null packets" << std::endl;
 }
 
 void ServerConfig::kill_previous_instance()

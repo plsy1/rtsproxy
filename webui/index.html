@@ -21,12 +21,20 @@
         <!-- STATUS ROW 1: Performance -->
         <div class="status-bar">
             <div class="stat-item">
-                <span class="label">Bandwidth</span>
-                <span class="value" id="bandwidth">0 Mbps</span>
+                <span class="label">Up Bandwidth</span>
+                <span class="value" id="up-bandwidth">0 Mbps</span>
             </div>
             <div class="stat-item">
-                <span class="label">Traffic</span>
-                <span class="value" id="total-traffic">0 B</span>
+                <span class="label">Down Bandwidth</span>
+                <span class="value" id="down-bandwidth">0 Mbps</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Up Traffic</span>
+                <span class="value" id="up-traffic">0 B</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">Down Traffic</span>
+                <span class="value" id="down-traffic">0 B</span>
             </div>
             <div class="stat-item">
                 <span class="label">Clients</span>
@@ -63,6 +71,8 @@
                                 <th>Downstream</th>
                                 <th>Upstream</th>
                                 <th>Type</th>
+                                <th>Up Bitrate</th>
+                                <th>Down Bitrate</th>
                                 <th>Protocol</th>
                                 <th>Duration</th>
                             </tr>

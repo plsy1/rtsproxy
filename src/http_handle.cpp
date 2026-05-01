@@ -217,8 +217,12 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         
         auto& stats = Statistics::getInstance();
         stats.setActiveClients(loop->get_client_count());
+        status["stats"]["up_traffic"] = stats.getTotalUpstreamBytes();
+        status["stats"]["down_traffic"] = stats.getTotalDownstreamBytes();
         status["stats"]["traffic"] = stats.getTotalBytes();
-        status["stats"]["bandwidth"] = (uint64_t)stats.getBandwidth();
+        status["stats"]["up_bandwidth"] = (uint64_t)stats.getUpstreamBandwidth();
+        status["stats"]["down_bandwidth"] = (uint64_t)stats.getDownstreamBandwidth();
+        status["stats"]["bandwidth"] = (uint64_t)stats.getDownstreamBandwidth(); // Keep for backward compatibility
         status["stats"]["active_clients"] = stats.getActiveClients();
         status["clients"] = loop->get_all_clients_info();
         

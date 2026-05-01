@@ -694,15 +694,24 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
         if (src.sin_port == server_rtp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
-            if (is_downstream_tcp_)
-            {
-                send_interleaved_downstream(ds_interleaved_rtp_, buf.get(), n);
-            }
-            else if (client_rtp_addr_.sin_port != 0)
-            {
-                sendto(rtp_ds_fd_, buf.get(), n, 0,
-                       (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
-                Statistics::getInstance().addBytes(n);
+            upstream_est_.addBytes(n);
+            Statistics::getInstance().addUpstreamBytes(n);
+            size_t actual_n = static_cast<size_t>(n);
+            strip_rtp_padding_and_ts_null(buf.get(), actual_n);
+            n = static_cast<ssize_t>(actual_n);
+            
+            if (n > 0) {
+                if (is_downstream_tcp_)
+                {
+                    send_interleaved_downstream(ds_interleaved_rtp_, buf.get(), n);
+                }
+                else if (client_rtp_addr_.sin_port != 0)
+                {
+                    sendto(rtp_ds_fd_, buf.get(), n, 0,
+                           (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
+                    downstream_est_.addBytes(n);
+                    Statistics::getInstance().addDownstreamBytes(n);
+                }
             }
         }
         pool_.release(std::move(buf));
@@ -727,6 +736,8 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         if (src.sin_port == server_rtcp_addr_.sin_port &&
             src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
+            upstream_est_.addBytes(n);
+            Statistics::getInstance().addUpstreamBytes(n);
             if (is_downstream_tcp_)
             {
                 send_interleaved_downstream(ds_interleaved_rtcp_, buf.get(), n);
@@ -735,7 +746,8 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
             {
                 sendto(rtcp_ds_fd_, buf.get(), n, 0,
                        (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
-                Statistics::getInstance().addBytes(n);
+                downstream_est_.addBytes(n);
+                Statistics::getInstance().addDownstreamBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -762,6 +774,7 @@ void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t 
     }
 
     to_downstream_q_.push_back(Packet{std::move(buf), len + 4, 0});
+    downstream_est_.addBytes(len + 4);
     
     // We need to trigger EPOLLOUT to drain the queue
     loop_->set(downstream_ctx_.get(), downstream_fd_,
@@ -778,7 +791,7 @@ void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8
         {
             sendto(rtp_us_fd_, data, len, 0,
                    (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
-            Statistics::getInstance().addBytes(len);
+            Statistics::getInstance().addUpstreamBytes(len);
         }
     }
     else if (channel == ds_interleaved_rtcp_)
@@ -787,7 +800,7 @@ void RTSPMitmClient::handle_interleaved_from_client(uint8_t channel, const uint8
         {
             sendto(rtcp_us_fd_, data, len, 0,
                    (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
-            Statistics::getInstance().addBytes(len);
+            Statistics::getInstance().addUpstreamBytes(len);
         }
     }
 }
@@ -797,20 +810,40 @@ void RTSPMitmClient::handle_interleaved_from_upstream(uint8_t channel, const uin
     // Relay RTP/RTCP from upstream (TCP) to downstream
     if (channel == us_interleaved_rtp_)
     {
-        if (is_downstream_tcp_)
-            send_interleaved_downstream(ds_interleaved_rtp_, data, len);
-        else if (client_rtp_addr_.sin_port != 0) {
-            sendto(rtp_ds_fd_, data, len, 0, (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
-            Statistics::getInstance().addBytes(len);
+        upstream_est_.addBytes(len);
+        // We might need to copy if we want to modify the data
+        if (is_downstream_tcp_) {
+            // send_interleaved_downstream already copies to a pool buffer, 
+            // but we need to modify the data before that if we want to strip.
+            // Let's copy it first.
+            auto buf = pool_.acquire();
+            size_t n = std::min(len, pool_.get_buffer_size());
+            memcpy(buf.get(), data, n);
+            strip_rtp_padding_and_ts_null(buf.get(), n);
+            if (n > 0) {
+                send_interleaved_downstream(ds_interleaved_rtp_, buf.get(), n);
+            }
+            pool_.release(std::move(buf));
+        } else if (client_rtp_addr_.sin_port != 0) {
+            auto buf = pool_.acquire();
+            size_t n = std::min(len, pool_.get_buffer_size());
+            memcpy(buf.get(), data, n);
+            strip_rtp_padding_and_ts_null(buf.get(), n);
+            if (n > 0) {
+                sendto(rtp_ds_fd_, buf.get(), n, 0, (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
+                Statistics::getInstance().addDownstreamBytes(n);
+            }
+            pool_.release(std::move(buf));
         }
     }
     else if (channel == us_interleaved_rtcp_)
     {
+        upstream_est_.addBytes(len);
         if (is_downstream_tcp_)
             send_interleaved_downstream(ds_interleaved_rtcp_, data, len);
         else if (client_rtcp_addr_.sin_port != 0) {
             sendto(rtcp_ds_fd_, data, len, 0, (sockaddr *)&client_rtcp_addr_, sizeof(client_rtcp_addr_));
-            Statistics::getInstance().addBytes(len);
+            Statistics::getInstance().addUpstreamBytes(len);
         }
     }
 }
@@ -840,7 +873,7 @@ void RTSPMitmClient::handle_rtp_from_client(uint32_t /*events*/)
             {
                 sendto(rtp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtp_addr_, sizeof(server_rtp_addr_));
-                Statistics::getInstance().addBytes(n);
+                Statistics::getInstance().addUpstreamBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -872,7 +905,7 @@ void RTSPMitmClient::handle_rtcp_from_client(uint32_t /*events*/)
             {
                 sendto(rtcp_us_fd_, buf.get(), n, 0,
                        (sockaddr *)&server_rtcp_addr_, sizeof(server_rtcp_addr_));
-                Statistics::getInstance().addBytes(n);
+                Statistics::getInstance().addUpstreamBytes(n);
             }
         }
         pool_.release(std::move(buf));
@@ -1023,7 +1056,7 @@ void RTSPMitmClient::on_downstream_writable()
                          packet.length - packet.offset, 0);
         if (n > 0)
         {
-            Statistics::getInstance().addBytes(n);
+            Statistics::getInstance().addDownstreamBytes(n);
             packet.offset += n;
             if (packet.offset == packet.length)
             {
@@ -1405,5 +1438,48 @@ json RTSPMitmClient::get_info() const
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
     info["proxy"] = std::to_string(duration);
+    info["upstream_bandwidth"] = (uint64_t)upstream_est_.getBandwidth();
+    info["downstream_bandwidth"] = (uint64_t)downstream_est_.getBandwidth();
     return info;
+}
+void RTSPMitmClient::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len)
+{
+    if (len < 12 || (buf[0] & 0xC0) != 0x80) return;
+
+    size_t payload_offset = 12 + (buf[0] & 0x0F) * 4;
+    if (buf[0] & 0x10) { // Extension
+        if (payload_offset + 4 > len) return;
+        uint16_t ext_len = ntohs(*reinterpret_cast<uint16_t *>(buf + payload_offset + 2));
+        payload_offset += 4 + 4 * ext_len;
+    }
+    if (payload_offset > len) return;
+
+    // 1. Strip RTP Padding
+    if (buf[0] & 0x20) {
+        uint8_t padding_len = buf[len - 1];
+        if (padding_len > 0 && padding_len < (len - payload_offset)) {
+            len -= padding_len;
+            buf[0] &= ~0x20; // Clear padding bit
+        }
+    }
+
+    // 2. Strip TS Null Packets (PID 0x1FFF)
+    if (ServerConfig::isStripPadding()) {
+        size_t payload_len = len - payload_offset;
+        // Check if it's MPEG-TS (starts with 0x47)
+        if (payload_len >= 188 && buf[payload_offset] == 0x47) {
+            size_t new_payload_len = 0;
+            for (size_t i = 0; i + 188 <= payload_len; i += 188) {
+                uint16_t pid = ((buf[payload_offset + i + 1] & 0x1F) << 8) | buf[payload_offset + i + 2];
+                if (pid != 0x1FFF) {
+                    if (new_payload_len != i) {
+                        memmove(buf + payload_offset + new_payload_len, buf + payload_offset + i, 188);
+                    }
+                    new_payload_len += 188;
+                }
+            }
+            len = payload_offset + new_payload_len;
+            if (new_payload_len == 0) len = 0; // Drop entire packet if only null packets
+        }
+    }
 }

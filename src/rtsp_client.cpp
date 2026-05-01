@@ -250,6 +250,8 @@ void RTSPClient::on_rtsp_readable()
                         break;
 
                     uint8_t channel = static_cast<uint8_t>(resp_buf_[1]);
+                    upstream_est_.addBytes(len + 4);
+                    Statistics::getInstance().addUpstreamBytes(len + 4);
                     handle_interleaved_packet(channel, reinterpret_cast<const uint8_t *>(resp_buf_.data() + 4), len);
                     resp_buf_.erase(0, 4 + len);
                     continue;
@@ -384,6 +386,8 @@ void RTSPClient::on_rtp_readable()
         return;
     }
 
+    upstream_est_.addBytes(n);
+    Statistics::getInstance().addUpstreamBytes(n);
     size_t recv_len = static_cast<size_t>(n);
 
     if (get_rtp_payload_offset(buf.get(), recv_len, payload_offset))
@@ -471,7 +475,8 @@ void RTSPClient::on_client_writable()
             }
         }
 
-        Statistics::getInstance().addBytes(n);
+        Statistics::getInstance().addDownstreamBytes(n);
+        downstream_est_.addBytes(n);
         packet.offset += n;
 
         if (packet.offset == packet.length)
@@ -692,7 +697,10 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
     // Adjust for padding
     if (unlikely(flags & 0x20))
     {
-        payload_len -= buf[recv_len - 1];
+        uint8_t padding_len = buf[recv_len - 1];
+        if (padding_len > 0 && padding_len < payload_len) {
+            payload_len -= padding_len;
+        }
     }
 
     if (payload_len == 0 || payloadstart + payload_len > recv_len)
@@ -701,7 +709,28 @@ bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &
         return false;
     }
 
-    payload_offset = recv_len - payload_len;
+    // Strip TS Null Packets (PID 0x1FFF)
+    if (ServerConfig::isStripPadding()) {
+        // Check if it's MPEG-TS (starts with 0x47)
+        if (payload_len >= 188 && buf[payloadstart] == 0x47) {
+            size_t new_payload_len = 0;
+            for (size_t i = 0; i + 188 <= payload_len; i += 188) {
+                uint16_t pid = ((buf[payloadstart + i + 1] & 0x1F) << 8) | buf[payloadstart + i + 2];
+                if (pid != 0x1FFF) {
+                    if (new_payload_len != i) {
+                        memmove(buf + payloadstart + new_payload_len, buf + payloadstart + i, 188);
+                    }
+                    new_payload_len += 188;
+                }
+            }
+            payload_len = new_payload_len;
+        }
+    }
+
+    if (payload_len == 0) return false;
+
+    payload_offset = payloadstart;
+    recv_len = payloadstart + payload_len;
 
     return true;
 }
@@ -908,6 +937,8 @@ json RTSPClient::get_info() const
     auto now = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
     info["proxy"] = std::to_string(duration);
+    info["upstream_bandwidth"] = (uint64_t)upstream_est_.getBandwidth();
+    info["downstream_bandwidth"] = (uint64_t)downstream_est_.getBandwidth();
     
     return info;
 }

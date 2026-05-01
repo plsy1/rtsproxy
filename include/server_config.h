@@ -21,6 +21,7 @@ public:
     static void setLogFile(std::string path);
     static void setLogLines(size_t lines);
     static void setBlacklist(const std::vector<std::string> &list);
+    static void setStripPadding(bool enable);
 
     static bool isNatEnabled();
     static std::string getNatMethod();
@@ -36,6 +37,7 @@ public:
     static std::string getListenInterface();
     static std::string getLogFile();
     static size_t getLogLines();
+    static bool isStripPadding();
     static const std::vector<std::string>& getBlacklist();
     static void printUsage(const std::string &program_name);
 
@@ -56,5 +58,6 @@ private:
     static std::string listen_interface;
     static std::string log_file_path;
     static size_t log_file_lines;
+    static bool strip_padding;
     static std::vector<std::string> blacklist;
 };

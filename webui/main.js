@@ -6,8 +6,10 @@ class Dashboard {
 
         // DOM Elements
         this.elements = {
-            bandwidth: document.getElementById('bandwidth'),
-            totalTraffic: document.getElementById('total-traffic'),
+            upBandwidth: document.getElementById('up-bandwidth'),
+            downBandwidth: document.getElementById('down-bandwidth'),
+            upTraffic: document.getElementById('up-traffic'),
+            downTraffic: document.getElementById('down-traffic'),
             activeClients: document.getElementById('active-clients'),
             usedBuffers: document.getElementById('used-count'),
             totalBuffers: document.getElementById('total-buffers'),
@@ -73,9 +75,14 @@ class Dashboard {
         const stats = data.stats || {};
         const pool = data.pool || {};
         
-        const bandwidthMbps = (stats.bandwidth || 0) * 8 / 1000000;
-        this.elements.bandwidth.innerText = `${bandwidthMbps.toFixed(2)} Mbps`;
-        this.elements.totalTraffic.innerText = this.formatBytes(stats.traffic || 0);
+        const upMbps = (stats.up_bandwidth || 0) * 8 / 1000000;
+        const downMbps = (stats.down_bandwidth || 0) * 8 / 1000000;
+        this.elements.upBandwidth.innerText = `${upMbps.toFixed(2)} Mbps`;
+        this.elements.downBandwidth.innerText = `${downMbps.toFixed(2)} Mbps`;
+        
+        this.elements.upTraffic.innerText = this.formatBytes(stats.up_traffic || 0);
+        this.elements.downTraffic.innerText = this.formatBytes(stats.down_traffic || 0);
+        
         this.elements.activeClients.innerText = stats.active_clients || 0;
         this.elements.usedBuffers.innerText = `${pool.used || 0} (Peak: ${pool.peak || 0})`;
         this.elements.totalBuffers.innerText = pool.allocated || 0;
@@ -94,11 +101,16 @@ class Dashboard {
             const durationDisplay = isNaN(durationSeconds) ? '--' : this.formatDuration(durationSeconds);
             const type = client.type === 'mitm' ? 'MITM' : 'HTTP';
             
+            const upBps = (client.upstream_bandwidth || 0) / 1000000;
+            const downBps = (client.downstream_bandwidth || 0) / 1000000;
+
             return `
                 <tr>
                     <td style="color:var(--accent-blue)">${client.downstream}</td>
                     <td>${client.upstream}</td>
                     <td style="font-weight:700; font-size:0.7rem">${type}</td>
+                    <td style="color:#60a5fa; font-family:'JetBrains Mono'">${upBps.toFixed(2)} Mbps</td>
+                    <td style="color:#34d399; font-family:'JetBrains Mono'">${downBps.toFixed(2)} Mbps</td>
                     <td><span class="tag ${tagClass}">${client.transport || 'UDP'}</span></td>
                     <td>${durationDisplay}</td>
                 </tr>

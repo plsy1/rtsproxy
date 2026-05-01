@@ -142,6 +142,7 @@ private:
     void send_rtp_trigger();
     void send_zte_heartbeat();
     void process_pending_setup();
+    void strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len);
 
     void close_all();
 
@@ -231,4 +232,6 @@ private:
     uint16_t nat_wan_port_us_{0};
     std::string pending_setup_req_;
 
+    mutable BandwidthEstimator upstream_est_;
+    mutable BandwidthEstimator downstream_est_;
 };
