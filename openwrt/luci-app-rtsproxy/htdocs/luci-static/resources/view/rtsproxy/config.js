@@ -17,6 +17,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'rtsproxy', _('General Settings'));
 		s.tab('basic', _('Basic Settings'));
+		s.tab('playback', _('Playback Settings'));
 		s.tab('nat', _('NAT Settings'));
 		s.tab('logging', _('Logging Settings'));
 
@@ -44,6 +45,15 @@ return view.extend({
 		o.default = 'stun';
 		o.depends('enable_nat', '1');
 
+		o = s.taboption('nat', form.Value, 'stun_host', _('STUN Host'), _('STUN server address (default: stun.l.google.com)'));
+		o.placeholder = 'stun.l.google.com';
+		o.depends({ 'enable_nat': '1', 'nat_method': 'stun' });
+
+		o = s.taboption('nat', form.Value, 'stun_port', _('STUN Port'), _('STUN server port (default: 19302)'));
+		o.datatype = 'port';
+		o.placeholder = '19302';
+		o.depends({ 'enable_nat': '1', 'nat_method': 'stun' });
+
 		o = s.taboption('basic', form.Value, 'buffer_pool_count', _('Buffer Pool Count'), _('Number of blocks in the buffer pool (default: 8192)'));
 		o.datatype = 'uinteger';
 		o.placeholder = '8192';
@@ -69,6 +79,13 @@ return view.extend({
 
 		o = s.taboption('basic', form.Value, 'json_path', _('JSON Config Path'), _('Path to URL rewrite rules (default: /etc/rtsproxy/config.json)'));
 		o.placeholder = '/etc/rtsproxy/config.json';
+
+		// Playback Tab
+		o = s.taboption('playback', form.Flag, 'strip_padding', _('Bandwidth Optimization'), _('Strip MPEG-TS Null Packets (PID 0x1FFF) to save bandwidth'));
+		o.default = o.disabled;
+
+		o = s.taboption('playback', form.Flag, 'wait_keyframe', _('Startup Optimization'), _('Wait for the first keyframe (I-Frame) to prevent initial green screen'));
+		o.default = o.disabled;
 
 		// Logging Tab
 		o = s.taboption('logging', form.Flag, 'watchdog', _('Watchdog Mode'), _('Auto-restart worker process on crash'));

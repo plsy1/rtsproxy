@@ -56,15 +56,15 @@ int main(int argc, char *argv[])
             {"port", required_argument, nullptr, 'p'},
             {"enable-nat", no_argument, nullptr, 'n'},
             {"nat-method", required_argument, nullptr, 0},
-            {"buffer-pool-count", required_argument, nullptr, 'c'},
+            {"buffer-pool-count", required_argument, nullptr, 'b'},
             {"buffer-pool-block-size", required_argument, nullptr, 's'},
             {"auth-token", required_argument, nullptr, 't'},
             {"http-interface", required_argument, nullptr, 0},
             {"mitm-interface", required_argument, nullptr, 0},
             {"listen-interface", required_argument, nullptr, 'l'},
-            {"json-path", required_argument, nullptr, 'j'},
-            {"set-stun-port", required_argument, nullptr, 0},
-            {"set-stun-host", required_argument, nullptr, 0},
+            {"config", required_argument, nullptr, 'c'},
+            {"stun-port", required_argument, nullptr, 0},
+            {"stun-host", required_argument, nullptr, 0},
             {"kill", no_argument, nullptr, 'k'},
             {"daemon", no_argument, nullptr, 'd'},
             {"watchdog", no_argument, nullptr, 'w'},
@@ -72,17 +72,17 @@ int main(int argc, char *argv[])
             {"log-lines", required_argument, nullptr, 0},
             {"log-level", required_argument, nullptr, 0},
             {"strip-padding", no_argument, nullptr, 0},
-            {"no-wait-keyframe", no_argument, nullptr, 0},
+            {"wait-keyframe", no_argument, nullptr, 0},
             {nullptr, 0, nullptr, 0}};
 
     // 1. Initial scan for -j or --json-path to determine the config file location
     int temp_opt;
     int temp_longindex = -1;
-    while ((temp_opt = getopt_long(argc, argv, "p:nc:s:t:j:l:kdw", long_options, &temp_longindex)) != -1)
+    while ((temp_opt = getopt_long(argc, argv, "p:nb:s:t:c:l:kdw", long_options, &temp_longindex)) != -1)
     {
-        if (temp_opt == 'j') {
+        if (temp_opt == 'c') {
             ServerConfig::setJsonPath(optarg);
-        } else if (temp_opt == 0 && temp_longindex >= 0 && strcmp(long_options[temp_longindex].name, "json-path") == 0) {
+        } else if (temp_opt == 0 && temp_longindex >= 0 && strcmp(long_options[temp_longindex].name, "config") == 0) {
             ServerConfig::setJsonPath(optarg);
         }
     }
@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
     // 3. Parse all arguments (command line overrides config file)
     int opt;
     int longindex = -1;
-    while ((opt = getopt_long(argc, argv, "p:nc:s:t:j:l:kdw", long_options, &longindex)) != -1)
+    while ((opt = getopt_long(argc, argv, "p:nb:s:t:c:l:kdw", long_options, &longindex)) != -1)
     {
         switch (opt)
         {
@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
         case 'n':
             ServerConfig::setNatEnabled(true);
             break;
-        case 'c':
+        case 'b':
             ServerConfig::setBufferPoolCount(std::atoi(optarg));
             break;
         case 's':
@@ -114,7 +114,7 @@ int main(int argc, char *argv[])
         case 't':
             ServerConfig::setToken(optarg);
             break;
-        case 'j':
+        case 'c':
             ServerConfig::setJsonPath(optarg);
             break;
         case 'l':
@@ -135,11 +135,11 @@ int main(int argc, char *argv[])
                 ServerConfig::setNatMethod(optarg);
                 ServerConfig::setNatEnabled(true);
             }
-            else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-port") == 0)
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "stun-port") == 0)
             {
                 ServerConfig::setStunPort(std::atoi(optarg));
             }
-            else if (longindex >= 0 && strcmp(long_options[longindex].name, "set-stun-host") == 0)
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "stun-host") == 0)
             {
                 ServerConfig::setStunHost(optarg);
             }
@@ -172,10 +172,10 @@ int main(int argc, char *argv[])
                 ServerConfig::setStripPadding(true);
                 Logger::info("[CONFIG] Padding stripping enabled");
             }
-            else if (longindex >= 0 && strcmp(long_options[longindex].name, "no-wait-keyframe") == 0)
+            else if (longindex >= 0 && strcmp(long_options[longindex].name, "wait-keyframe") == 0)
             {
-                ServerConfig::setWaitKeyframe(false);
-                Logger::info("[CONFIG] Wait for keyframe disabled");
+                ServerConfig::setWaitKeyframe(true);
+                Logger::info("[CONFIG] Wait for keyframe enabled");
             }
             break;
         default:

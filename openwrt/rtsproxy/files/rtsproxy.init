@@ -22,6 +22,8 @@ start_service() {
 	local log_lines
 	local log_level
 	local nat_method
+	local stun_host
+	local stun_port
 	local strip_padding
 	local wait_keyframe
 	local use_external_config
@@ -33,6 +35,8 @@ start_service() {
 	config_get port "main" "port" "8554"
 	config_get_bool enable_nat "main" "enable_nat" 0
 	config_get nat_method "main" "nat_method" "stun"
+	config_get stun_host "main" "stun_host" "stun.l.google.com"
+	config_get stun_port "main" "stun_port" "19302"
 	config_get buffer_pool_count "main" "buffer_pool_count" "8192"
 	config_get buffer_pool_block_size "main" "buffer_pool_block_size" "2048"
 	config_get auth_token "main" "auth_token" ""
@@ -50,15 +54,17 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command "$PROG"
-	procd_append_param command -j "$json_path"
+	procd_append_param command -c "$json_path"
 
 	if [ "$use_external_config" -eq 0 ]; then
 		# Normal mode: UCI overrides JSON
 		procd_append_param command -p "$port"
-		procd_append_param command -r "$buffer_pool_count"
-		procd_append_param command -u "$buffer_pool_block_size"
+		procd_append_param command -b "$buffer_pool_count"
+		procd_append_param command -s "$buffer_pool_block_size"
 		[ "$enable_nat" -eq 1 ] && procd_append_param command -n
 		[ "$enable_nat" -eq 1 ] && procd_append_param command --nat-method "$nat_method"
+		[ "$enable_nat" -eq 1 ] && [ "$nat_method" = "stun" ] && [ -n "$stun_host" ] && procd_append_param command --stun-host "$stun_host"
+		[ "$enable_nat" -eq 1 ] && [ "$nat_method" = "stun" ] && [ -n "$stun_port" ] && procd_append_param command --stun-port "$stun_port"
 		[ -n "$auth_token" ] && procd_append_param command -t "$auth_token"
 		[ -n "$http_interface" ] && procd_append_param command --http-interface "$http_interface"
 		[ -n "$mitm_interface" ] && procd_append_param command --mitm-interface "$mitm_interface"
@@ -67,7 +73,7 @@ start_service() {
 		[ -n "$log_lines" ] && procd_append_param command --log-lines "$log_lines"
 		[ -n "$log_level" ] && procd_append_param command --log-level "$log_level"
 		[ "$strip_padding" -eq 1 ] && procd_append_param command --strip-padding
-		[ "$wait_keyframe" -eq 0 ] && procd_append_param command --no-wait-keyframe
+		[ "$wait_keyframe" -eq 1 ] && procd_append_param command --wait-keyframe
 	fi
 	
 	[ "$watchdog" -eq 1 ] && procd_append_param command -w

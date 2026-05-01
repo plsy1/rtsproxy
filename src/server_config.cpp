@@ -21,7 +21,7 @@ std::string ServerConfig::listen_interface = "";
 std::string ServerConfig::log_file_path = "";
 size_t ServerConfig::log_file_lines = 10000;
 bool ServerConfig::strip_padding = false;
-bool ServerConfig::wait_keyframe = true;
+bool ServerConfig::wait_keyframe = false;
 bool ServerConfig::watchdog_enabled = false;
 bool ServerConfig::daemon_enabled = false;
 std::vector<std::string> ServerConfig::blacklist = {};
@@ -219,21 +219,21 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "  -p, --port            <port>  Set HTTP server port (default: " << port << ")" << std::endl;
     std::cout << "  -n, --enable-nat              Enable NAT (default: " << (enable_nat ? "enabled" : "disabled") << ")" << std::endl;
     std::cout << "      --nat-method      <method> Set NAT method: stun, zte (default: " << nat_method << ")" << std::endl;
-    std::cout << "  -c, --buffer-pool-count <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
+    std::cout << "  -b, --buffer-pool-count <count> Set BufferPool block count (default: " << buffer_pool_count << ")" << std::endl;
     std::cout << "  -s, --buffer-pool-block-size <size>  Set BufferPool block size (default: " << buffer_pool_block_size << ")" << std::endl;
     std::cout << "  -t, --auth-token      <token> Set auth token for HTTP API and RTSP access (default: none)" << std::endl;
     std::cout << "      --http-interface  <iface> Set HTTP mode upstream interface" << std::endl;
     std::cout << "      --mitm-interface  <iface> Set MITM mode upstream interface" << std::endl;
     std::cout << "  -l, --listen-interface <iface> Set interface to listen on" << std::endl;
-    std::cout << "  -j, --json-path       <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
+    std::cout << "  -c, --config          <path>  Set JSON file path (default: " << json_path << ")" << std::endl;
     std::cout << "  -d, --daemon                  Run rtsproxy in the background" << std::endl;
     std::cout << "  -w, --watchdog                Run in watchdog mode (auto-restart on crash)" << std::endl;
     std::cout << "      --log-file        <path>  Write logs to a specific file instead of stdout" << std::endl;
     std::cout << "      --log-lines       <count> Set maximum log file lines (default: 10000)" << std::endl;
     std::cout << "      --log-level       <level> Set log level: error, warn, info, debug (default: info)" << std::endl;
     std::cout << "  -k, --kill                    Kill the running rtsproxy instance" << std::endl;
-    std::cout << "      --set-stun-host   <host>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
-    std::cout << "      --set-stun-port   <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
+    std::cout << "      --stun-host       <host>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
+    std::cout << "      --stun-port       <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
     std::cout << "      --strip-padding           Strip RTP padding and TS null packets" << std::endl;
 }
 

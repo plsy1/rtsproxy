@@ -83,15 +83,18 @@
 *   **精确匹配**：如 `"8.8.8.8"`。
 
 ### 3. 带宽优化 (`--strip-padding`)
-针对 IPTV 场景中的 CBR（恒定比特率）视频流进行优化。开启此功能后：
+针对 IPTV 场景中的 CBR（恒定比特率）视频流进行优化。
 
 *   **自动剥离空包**：识别并丢弃 MPEG-TS 流中 PID 为 `0x1FFF` 的 Null Packets。
 *   **带宽节省**：通常可降低 10%-30% 的下游带宽需求，显著减少网络卡顿。
 *   **低延迟**：采用原地内存压缩算法，几乎不增加额外延迟。
-*   **起播优化**：默认开启关键帧等待（Wait for Keyframe），防止起播瞬间绿屏。
+*   **控制开关**：该功能默认关闭。如果需要优化带宽，可使用 `--strip-padding` 开启该逻辑。
 
-> [!TIP]
-> **起播绿屏控制**：如果你使用的播放器自带快速找帧功能，可以使用 `--no-wait-keyframe` 禁用代理端的等待逻辑以获得更快的首屏速度。
+### 4. 起播优化 (关键帧等待)
+为了解决直播流起播瞬间可能出现的绿屏或花屏问题：
+
+*   **关键帧等待**：代理在接收到播放请求后，可以选择丢弃第一个关键帧（I-Frame）之前的蓝帧或非完整帧。
+*   **控制开关**：该功能默认关闭。如果需要防止起播绿屏，可使用 `--wait-keyframe` 开启该逻辑。
 
 > [!NOTE]
 > 环回检测是内置的：即使未配置黑名单，代理也会自动拒绝指向其自身监听地址的递归请求。
@@ -105,15 +108,15 @@ Options:
   -p, --port            <port>  设置代理主端口 (默认: 8554)
   -n, --enable-nat              开启 NAT 穿越
       --nat-method      <method> 设置 NAT 穿越模式: stun, zte (默认: stun)
-  -c, --buffer-pool-count <count> 设置 BufferPool 块数量 (默认: 8192)
+  -b, --buffer-pool-count <count> 设置 BufferPool 块数量 (默认: 8192)
   -s, --buffer-pool-block-size <size> 设置 BufferPool 块大小 (默认: 2048)
   -t, --auth-token      <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
       --http-interface  <iface> 设置 HTTP 模式上游网口
       --mitm-interface  <iface> 设置 MITM 模式上游网口
-      --set-stun-host   <host>  设置 STUN 服务器地址 (默认: stun.l.google.com)
-      --set-stun-port   <port>  设置 STUN 服务器端口 (默认: 19302)
-  -j, --json-path       <path>  设置规则配置文件路径 (默认: config.json)
+      --stun-host       <host>  设置 STUN 服务器地址 (默认: stun.l.google.com)
+      --stun-port       <port>  设置 STUN 服务器端口 (默认: 19302)
+  -c, --config          <path>  设置规则配置文件路径 (默认: config.json)
   -w, --watchdog                开启自动重启模式
   -d, --daemon                  后台运行
   -k, --kill                    杀死正在运行的实例
@@ -121,7 +124,7 @@ Options:
       --log-lines       <count> 设置日志滚动行数 (默认: 10000)
       --log-level       <level> 设置日志等级: error, warn, info, debug (默认: info)
       --strip-padding           开启 MPEG-TS 空包剥离 (带宽优化)
-      --no-wait-keyframe        关闭起播关键帧等待 (降低首屏延迟，但可能导致初始绿屏)
+      --wait-keyframe           开启起播关键帧等待 (防止起播初始绿屏)
 ```
 
 ## NAT 穿越与打洞功能
