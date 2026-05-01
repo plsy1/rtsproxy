@@ -70,18 +70,25 @@ void rtspParser::SDP::parseMedia(const std::string &line, rtspCtx &ctx)
     std::getline(media_stream, port_str, ' ');
     std::getline(media_stream, protocol, ' ');
 
-    int port = std::stoi(port_str);
-    Media media;
-    media.type = type;
-    media.port = port;
-    media.protocol = protocol;
-    std::string format;
-    while (std::getline(media_stream, format, ' '))
+    try
     {
-        media.formats.push_back(format);
-    }
+        int port = std::stoi(port_str);
+        Media media;
+        media.type = type;
+        media.port = port;
+        media.protocol = protocol;
+        std::string format;
+        while (std::getline(media_stream, format, ' '))
+        {
+            media.formats.push_back(format);
+        }
 
-    ctx.sdp.media_streams.push_back(media);
+        ctx.sdp.media_streams.push_back(media);
+    }
+    catch (...)
+    {
+        Logger::error("[RTSP] Failed to parse media port: " + port_str);
+    }
 }
 
 void rtspParser::SDP::parseAttribute(const std::string &line, Media &media)
@@ -217,15 +224,23 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     std::string hostport = url.substr(7, slash - 7);
     size_t colon = hostport.find(':');
 
-    if (colon != std::string::npos)
+    try
     {
-        ctx.server_ip = hostport.substr(0, colon);
-        ctx.server_rtsp_port = std::stoi(hostport.substr(colon + 1));
+        if (colon != std::string::npos)
+        {
+            ctx.server_ip = hostport.substr(0, colon);
+            ctx.server_rtsp_port = std::stoi(hostport.substr(colon + 1));
+        }
+        else
+        {
+            ctx.server_ip = hostport;
+            ctx.server_rtsp_port = 554;
+        }
     }
-    else
+    catch (...)
     {
-        ctx.server_ip = hostport;
-        ctx.server_rtsp_port = 554;
+        Logger::error("[RTSP] Failed to parse port in URL: " + url);
+        return -1;
     }
 
     ctx.path = (slash != std::string::npos) ? url.substr(slash) : "/";

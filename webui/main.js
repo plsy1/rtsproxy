@@ -23,6 +23,12 @@ class Dashboard {
     }
 
     init() {
+        // Load saved log level
+        const savedLevel = localStorage.getItem('logLevel');
+        if (savedLevel && this.elements.logLevelSelect) {
+            this.elements.logLevelSelect.value = savedLevel;
+        }
+
         if (this.elements.clearLogsBtn) {
             this.elements.clearLogsBtn.onclick = () => this.elements.logDisplay.innerHTML = '';
         }
@@ -38,14 +44,8 @@ class Dashboard {
 
     async changeLogLevel() {
         const level = this.elements.logLevelSelect.value;
-        const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('token');
-        let fetchUrl = `/api/loglevel?level=${level}`;
-        if (token) fetchUrl += `&token=${token}`;
-        
-        try {
-            await fetch(fetchUrl);
-        } catch (e) {}
+        localStorage.setItem('logLevel', level);
+        // Backend API call removed - filtering is handled locally in updateLogs
     }
 
     async refresh() {

@@ -235,20 +235,6 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
         return;
     }
 
-    if (url.find("/api/loglevel") == 0)
-    {
-        size_t lpos = url.find("level=");
-        if (lpos != std::string::npos) {
-            int level = std::stoi(url.substr(lpos + 6));
-            Logger::setLogLevel((LogLevel)level);
-        }
-        json response;
-        response["status"] = "ok";
-        response["level"] = (int)Logger::getLogLevel();
-        send_json_response(client_fd, response);
-        return;
-    }
-
     if (url.find("/admin") == 0)
     {
         serve_admin_file(client_fd, url);

@@ -20,6 +20,7 @@ std::string ServerConfig::mitm_upstream_interface = "";
 std::string ServerConfig::listen_interface = "";
 std::string ServerConfig::log_file_path = "";
 size_t ServerConfig::log_file_lines = 10000;
+std::vector<std::string> ServerConfig::blacklist = {};
 
 void ServerConfig::setPort(int p)
 {
@@ -93,6 +94,10 @@ void ServerConfig::setLogLines(size_t lines)
 {
     log_file_lines = lines;
 }
+void ServerConfig::setBlacklist(const std::vector<std::string> &list)
+{
+    blacklist = list;
+}
 
 int ServerConfig::getPort()
 {
@@ -163,6 +168,10 @@ std::string ServerConfig::getLogFile()
 size_t ServerConfig::getLogLines()
 {
     return log_file_lines;
+}
+const std::vector<std::string>& ServerConfig::getBlacklist()
+{
+    return blacklist;
 }
 
 void ServerConfig::printUsage(const std::string &program_name)

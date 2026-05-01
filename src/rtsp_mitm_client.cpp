@@ -8,6 +8,7 @@
 #include "../include/common/socket_ctx.h"
 #include "../include/common/rtsp_ctx.h"
 #include "../include/rtsp_parser.h"
+#include "../include/blacklist_checker.h"
 #include "../include/socket_helper.h"
 #include "../include/stun_client.h"
 #include <sys/socket.h>
@@ -79,28 +80,18 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
 
     if (uri.rfind("rtsp://", 0) != 0)
     {
-        Logger::error("[MITM] First request does not contain a valid rtsp:// URI: " + uri);
-        if (on_closed_) on_closed_();
-        return;
+        throw std::runtime_error("First request does not contain a valid rtsp:// URI: " + uri);
     }
 
     ctx_.rtsp_url = uri;
     if (rtspParser::parse_url(uri, ctx_) != 0)
     {
-        Logger::error("[MITM] Failed to parse RTSP URL: " + uri);
-        if (on_closed_) on_closed_();
-        return;
+        throw std::runtime_error("Failed to parse RTSP URL: " + uri);
     }
 
     // ---------------------------------------------------------------
-    // Proxy-path URL format:
+    // Loopback detection & Proxy-path URL format:
     //   rtsp://proxy-host:port/real-host:port/actual/path
-    //
-    // After parse_url, ctx_.server_ip  = proxy-host
-    //                  ctx_.path       = /real-host:port/actual/path
-    //
-    // Detect this by checking whether the first path segment looks like
-    // "host:port" (contains a colon and only valid hostname/IP chars).
     // ---------------------------------------------------------------
     {
         std::string path = ctx_.path;
@@ -165,6 +156,27 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
                 }
             }
         }
+
+        // Now check the blacklist against the FINAL upstream server IP.
+        if (BlacklistChecker::is_blacklisted(ctx_.server_ip))
+        {
+            throw std::runtime_error("Connection to upstream " + ctx_.server_ip + " is forbidden by blacklist.");
+        }
+
+        // Final Loopback Check ...
+        // it is a recursive connection.
+        struct sockaddr_in local_addr{};
+        socklen_t addr_len = sizeof(local_addr);
+        if (getsockname(downstream_fd_, (struct sockaddr *)&local_addr, &addr_len) == 0)
+        {
+            std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
+            uint16_t proxy_port = ntohs(local_addr.sin_port);
+            if ((ctx_.server_ip == "127.0.0.1" || ctx_.server_ip == "localhost" || ctx_.server_ip == proxy_ip) &&
+                ctx_.server_rtsp_port == proxy_port)
+            {
+                throw std::runtime_error("Recursive connection detected: URL points back to proxy itself.");
+            }
+        }
     }
 
     // Stash the first request so it gets forwarded once the upstream TCP
@@ -204,10 +216,8 @@ void RTSPMitmClient::connect_upstream()
                                           ServerConfig::getMitmUpstreamInterface());
     if (upstream_fd_ < 0)
     {
-        Logger::error("[MITM] Failed to connect to upstream " + ctx_.server_ip +
-                      ":" + std::to_string(ctx_.server_rtsp_port));
-        close_all();
-        return;
+        throw std::runtime_error("Failed to connect to upstream " + ctx_.server_ip +
+                                ":" + std::to_string(ctx_.server_rtsp_port));
     }
 
     upstream_ctx_ = std::make_unique<SocketCtx>(

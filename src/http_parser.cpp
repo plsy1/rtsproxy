@@ -1,4 +1,5 @@
 #include "../include/http_parser.h"
+#include "../include/server_config.h"
 #include "../include/3rd/json.hpp"
 #include "../include/logger.h"
 #include <fstream>
@@ -149,6 +150,20 @@ bool httpParser::load_json(const std::string jsonPath)
     }
 
     ifs >> parseConfig;
+
+    if (parseConfig.contains("blacklist") && parseConfig["blacklist"].is_array())
+    {
+        std::vector<std::string> blacklist;
+        for (const auto &item : parseConfig["blacklist"])
+        {
+            if (item.is_string())
+            {
+                blacklist.push_back(item.get<std::string>());
+            }
+        }
+        ServerConfig::setBlacklist(blacklist);
+        Logger::info("[CONFIG] Loaded " + std::to_string(blacklist.size()) + " items into blacklist");
+    }
 
     return true;
 }

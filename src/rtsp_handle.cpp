@@ -80,18 +80,31 @@ void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
         }
     }
 
-    auto client = std::make_unique<RTSPMitmClient>(
-        loop, pool, client_addr, client_fd, first_request);
+    try
+    {
+        auto client = std::make_unique<RTSPMitmClient>(
+            loop, pool, client_addr, client_fd, first_request);
 
-    loop->add_client_to_map(client_fd, std::move(client));
+        loop->add_client_to_map(client_fd, std::move(client));
 
-    // Note: RTSPMitmClient now owns the fd and manages its own epoll registration.
-    // We set the on_closed callback to clean up the map entry.
-    loop->get_client_from_map(client_fd)->set_on_closed_callback(
-        [client_fd, loop, client_host]()
-        {
-                    Logger::debug("[RTSP-MITM] Client disconnect: " + client_host);
-            loop->add_task([client_fd, loop]()
-                           { loop->remove_client_from_map(client_fd); });
-        });
+        // Note: RTSPMitmClient now owns the fd and manages its own epoll registration.
+        // We set the on_closed callback to clean up the map entry.
+        loop->get_client_from_map(client_fd)->set_on_closed_callback(
+            [client_fd, loop, client_host]()
+            {
+                Logger::debug("[RTSP-MITM] Client disconnect: " + client_host);
+                loop->add_task([client_fd, loop]()
+                               { loop->remove_client_from_map(client_fd); });
+            });
+    }
+    catch (const std::exception &e)
+    {
+        Logger::error("[RTSP-MITM] Failed to initialize MITM client for " + client_host + ": " + e.what());
+        // Since the constructor failed, the FdGuard inside didn't finish taking ownership
+        // OR it took ownership but was destroyed. In either case, we should ensure the fd is closed.
+        // Actually, if FdGuard was constructed, it will close it. 
+        // If it wasn't, we need to close it.
+        // Let's be safe and close it here if it's still open.
+        close(client_fd);
+    }
 }

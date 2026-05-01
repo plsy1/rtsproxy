@@ -37,6 +37,7 @@ executable(
         src_dir / 'server_config.cpp',
         src_dir / 'http_parser.cpp',
         src_dir / 'socket_helper.cpp',
+        src_dir / 'blacklist_checker.cpp',
     ),
     include_directories: include_directories(inc_dir),
     install: true,
