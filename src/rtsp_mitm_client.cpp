@@ -317,16 +317,6 @@ bool RTSPMitmClient::init_relay_sockets()
     loop_->set(rtp_ds_ctx_.get(), rtp_ds_fd_, EPOLLIN);
     loop_->set(rtcp_ds_ctx_.get(), rtcp_ds_fd_, EPOLLIN);
 
-    // Optimize UDP buffers using ServerConfig values
-    int total_buf_size = ServerConfig::getBufferPoolCount() * ServerConfig::getBufferPoolBlockSize();
-    if (total_buf_size < 1024 * 1024) total_buf_size = 2 * 1024 * 1024; // Min 2MB
-
-    auto optimize = [&](int fd) {
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
-        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
-    };
-    optimize(rtp_us_fd_); optimize(rtcp_us_fd_);
-    optimize(rtp_ds_fd_); optimize(rtcp_ds_fd_);
 
     Logger::debug("[MITM] Relay ports: US=" + std::to_string(local_rtp_us_port_) + 
                  ", DS=" + std::to_string(local_rtp_ds_port_));
@@ -1519,10 +1509,10 @@ void RTSPMitmClient::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len)
     // 1. Strip RTP Padding
     if (buf[0] & 0x20) {
         uint8_t padding_len = buf[len - 1];
-        if (padding_len > 0 && padding_len < (len - payload_offset)) {
+        if (padding_len > 0 && padding_len <= (len - payload_offset)) {
             len -= padding_len;
-            buf[0] &= ~0x20; // Clear padding bit
         }
+        buf[0] &= ~0x20; // ALWAYS clear padding bit if it was set
     }
 
     // 2. Strip TS Null Packets (PID 0x1FFF)
@@ -1542,6 +1532,9 @@ void RTSPMitmClient::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len)
             }
             len = payload_offset + new_payload_len;
             if (new_payload_len == 0) len = 0; // Drop entire packet if only null packets
+            
+            // Just in case, ensure padding bit is clear if we modified the packet
+            buf[0] &= ~0x20; 
         }
     }
 }

@@ -7,6 +7,13 @@
 #include <string>
 #include <random>
 
+static void optimize_udp_buffer(int fd)
+{
+    int buf_size = 2 * 1024 * 1024;
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+}
+
 int create_listen_socket(int port, const std::string &iface)
 {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -100,6 +107,7 @@ int bind_udp_socket_with_retry(int &fd, uint16_t &port, int max_attempts, const 
                     return -1;
                 }
             }
+            optimize_udp_buffer(fd);
             return 0;
         }
 
@@ -133,6 +141,8 @@ int bind_udp_socket(int &fd, const uint16_t &port, const std::string &iface = ""
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
         return -1;
+
+    optimize_udp_buffer(fd);
     return 0;
 }
 

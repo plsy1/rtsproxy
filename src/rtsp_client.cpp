@@ -569,16 +569,6 @@ void RTSPClient::init_rtp_rtcp_sockets()
         return;
     }
 
-    // Optimize UDP buffers using ServerConfig values
-    int total_buf_size = ServerConfig::getBufferPoolCount() * ServerConfig::getBufferPoolBlockSize();
-    if (total_buf_size < 1024 * 1024) total_buf_size = 2 * 1024 * 1024; // Min 2MB
-
-    auto optimize = [&](int fd) {
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &total_buf_size, sizeof(total_buf_size));
-        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &total_buf_size, sizeof(total_buf_size));
-    };
-    optimize(rtp_fd_);
-    optimize(rtcp_fd_);
 
     rtp_ctx_ = std::make_unique<SocketCtx>(
         rtp_fd_,
