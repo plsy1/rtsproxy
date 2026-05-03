@@ -24,12 +24,12 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
       buffer_pool_(pool),
       client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
                                               { handle_client(event); })),
+      start_time_(std::chrono::steady_clock::now()),
       client_addr_(client_addr),
-      client_fd_(client_fd, loop)
+      client_fd_(client_fd, loop),
+      rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
-    start_time_ = std::chrono::steady_clock::now();
     ctx.rtsp_url = rtsp_url;
-    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
 
     loop->remove(client_fd);
 
@@ -348,7 +348,7 @@ void RTSPClient::on_rtsp_readable()
                 else if (current_request_.method == RtspMethod::PLAY)
                 {
                     Logger::debug(std::string("[RTSP] Streaming Start: " + ctx.rtsp_url));
-                    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
+                    rtp_pipeline_->reset();
                     init_timer_fd();
                     state_ = RtspState::STREAMING;
                 }
@@ -392,37 +392,22 @@ void RTSPClient::on_rtp_readable()
     Statistics::getInstance().addUpstreamBytes(n);
     size_t recv_len = static_cast<size_t>(n);
 
-    if (get_rtp_payload_offset(buf.get(), recv_len, payload_offset))
+    if (rtp_pipeline_->process(buf.get(), recv_len))
     {
-        if (wait_for_keyframe_)
+        size_t payload_off = 0;
+        if (RtpPipeline::get_payload_offset(buf.get(), recv_len, payload_off))
         {
-            bool found = false;
-            if (recv_len - payload_offset >= 188 && buf[payload_offset] == 0x47)
-            {
-                for (size_t i = 0; payload_offset + i + 188 <= recv_len; i += 188)
-                {
-                    uint8_t *ts = buf.get() + payload_offset + i;
-                    uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
-                    if (pid == 0) { found = true; break; }
-                    uint8_t afc = (ts[3] & 0x30) >> 4;
-                    if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) { found = true; break; }
-                }
+            if (send_queue_.size() > 512) {
+                auto &old = send_queue_.front();
+                if (old.data) buffer_pool_.release(std::move(old.data));
+                send_queue_.pop_front();
             }
-            if (found) {
-                Logger::debug("[RTSP] Keyframe/PAT found, start forwarding");
-                wait_for_keyframe_ = false;
-            } else {
-                buffer_pool_.release(std::move(buf));
-                return;
-            }
+            send_queue_.push_back(Packet{std::move(buf), recv_len, payload_off});
         }
-
-        if (send_queue_.size() > 512) {
-            auto &old = send_queue_.front();
-            if (old.data) buffer_pool_.release(std::move(old.data));
-            send_queue_.pop_front();
+        else
+        {
+            buffer_pool_.release(std::move(buf));
         }
-        send_queue_.push_back(Packet{std::move(buf), recv_len, payload_offset});
     }
     else if (!is_init_ok)
     {
@@ -440,7 +425,6 @@ void RTSPClient::on_rtp_readable()
     }
     else
     {
-        // Unvalid rtp packet
         buffer_pool_.release(std::move(buf));
     }
 
@@ -465,14 +449,22 @@ void RTSPClient::handle_interleaved_packet(uint8_t channel, const uint8_t *data,
     size_t max_buf_size = buffer_pool_.get_buffer_size();
     size_t actual_len = std::min(len, max_buf_size);
     memcpy(buf.get(), data, actual_len);
-    if (get_rtp_payload_offset(buf.get(), actual_len, payload_offset))
+    if (rtp_pipeline_->process(buf.get(), actual_len))
     {
-        if (send_queue_.size() > 512) {
-            auto &old = send_queue_.front();
-            if (old.data) buffer_pool_.release(std::move(old.data));
-            send_queue_.pop_front();
+        size_t payload_off = 0;
+        if (RtpPipeline::get_payload_offset(buf.get(), actual_len, payload_off))
+        {
+            if (send_queue_.size() > 512) {
+                auto &old = send_queue_.front();
+                if (old.data) buffer_pool_.release(std::move(old.data));
+                send_queue_.pop_front();
+            }
+            send_queue_.push_back(Packet{std::move(buf), actual_len, payload_off});
         }
-        send_queue_.push_back(Packet{std::move(buf), actual_len, payload_offset});
+        else
+        {
+            buffer_pool_.release(std::move(buf));
+        }
     }
     else
     {
@@ -678,77 +670,6 @@ void RTSPClient::send_http_response()
     send_queue_.push_back(Packet{std::move(buf), len, 0});
 }
 
-bool RTSPClient::get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset)
-{
-    if (unlikely(recv_len < 12 || (buf[0] & 0xC0) != 0x80))
-    {
-        return false;
-    }
-
-    uint8_t flags = buf[0];
-    size_t payloadstart = 12 + (flags & 0x0F) * 4;
-
-    // Check for extension header
-    if (likely(flags & 0x10))
-    {
-        if (payloadstart + 4 > recv_len)
-        {
-            Logger::warn("[RTP] Malformed RTP packet: extension header truncated");
-            return false;
-        }
-
-        uint16_t ext_len = ntohs(*reinterpret_cast<uint16_t *>(buf + payloadstart + 2));
-        payloadstart += 4 + 4 * ext_len;
-        if (payloadstart > recv_len)
-        {
-            Logger::warn("[RTP] Malformed RTP packet: extension overruns packet");
-            return false;
-        }
-    }
-
-    // Calculate payload length
-    size_t payload_len = recv_len - payloadstart;
-
-    // Adjust for padding
-    if (unlikely(flags & 0x20))
-    {
-        uint8_t padding_len = buf[recv_len - 1];
-        if (padding_len > 0 && padding_len < payload_len) {
-            payload_len -= padding_len;
-        }
-    }
-
-    if (payload_len == 0 || payloadstart + payload_len > recv_len)
-    {
-        Logger::warn("[RTP] Malformed RTP packet: invalid payload length");
-        return false;
-    }
-
-    // Strip TS Null Packets (PID 0x1FFF)
-    if (ServerConfig::isStripPadding()) {
-        // Check if it's MPEG-TS (starts with 0x47)
-        if (payload_len >= 188 && buf[payloadstart] == 0x47) {
-            size_t new_payload_len = 0;
-            for (size_t i = 0; i + 188 <= payload_len; i += 188) {
-                uint16_t pid = ((buf[payloadstart + i + 1] & 0x1F) << 8) | buf[payloadstart + i + 2];
-                if (pid != 0x1FFF) {
-                    if (new_payload_len != i) {
-                        memmove(buf + payloadstart + new_payload_len, buf + payloadstart + i, 188);
-                    }
-                    new_payload_len += 188;
-                }
-            }
-            payload_len = new_payload_len;
-        }
-    }
-
-    if (payload_len == 0) return false;
-
-    payload_offset = payloadstart;
-    recv_len = payloadstart + payload_len;
-
-    return true;
-}
 
 std::string RTSPClient::RtspMethodToString(RtspMethod method)
 {

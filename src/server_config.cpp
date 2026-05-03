@@ -107,10 +107,20 @@ void ServerConfig::setBlacklist(const std::vector<std::string> &list)
 void ServerConfig::setStripPadding(bool enable)
 {
     strip_padding = enable;
+    if (enable) {
+        Logger::info("[CONFIG] MPEG-TS padding stripping ENABLED (Bandwidth Optimization)");
+    } else {
+        Logger::info("[CONFIG] MPEG-TS padding stripping DISABLED");
+    }
 }
 void ServerConfig::setWaitKeyframe(bool enable)
 {
     wait_keyframe = enable;
+    if (enable) {
+        Logger::info("[CONFIG] Startup keyframe synchronization ENABLED (Anti-Greenscreen)");
+    } else {
+        Logger::info("[CONFIG] Startup keyframe synchronization DISABLED");
+    }
 }
 void ServerConfig::setWatchdogEnabled(bool enable)
 {

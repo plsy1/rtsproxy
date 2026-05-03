@@ -9,7 +9,7 @@
         "log_level": "info", // 日志等级: error, warn, info, debug (默认: info)
         "log_file": "", // 日志文件路径 (留空则输出到控制台)
         "log_lines": 10000, // 日志滚动行数
-        "strip_padding": false, // 开启 MPEG-TS 空包剥离 (带宽优化)
+        "strip_padding": true, // 开启 MPEG-TS 空包剥离 (带宽优化)
         "wait_keyframe": false, // 开启起播关键帧等待 (防止绿屏)
         "watchdog": false, // 开启看门狗模式 (进程守护)
         "daemon": false, // 开启后台运行模式

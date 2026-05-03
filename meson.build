@@ -39,6 +39,7 @@ executable(
         src_dir / 'socket_helper.cpp',
         src_dir / 'blacklist_checker.cpp',
         src_dir / 'port_pool.cpp',
+        src_dir / 'rtp_pipeline.cpp',
     ),
     include_directories: include_directories(inc_dir),
     install: true,

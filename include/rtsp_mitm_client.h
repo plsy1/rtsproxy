@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <chrono>
+#include "rtp_pipeline.h"
 
 class EpollLoop;
 #include "../include/buffer_pool.h"
@@ -142,7 +143,6 @@ private:
     void send_rtp_trigger();
     void send_zte_heartbeat();
     void process_pending_setup();
-    void strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len);
 
     void close_all();
 
@@ -231,8 +231,7 @@ private:
     std::string ds_transport_protocol_;
     uint16_t nat_wan_port_us_{0};
     std::string pending_setup_req_;
-    bool wait_for_keyframe_{true};
-
     mutable BandwidthEstimator upstream_est_;
     mutable BandwidthEstimator downstream_est_;
+    std::unique_ptr<RtpPipeline> rtp_pipeline_;
 };

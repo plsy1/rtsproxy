@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <functional>
 #include <memory>
+#include "rtp_pipeline.h"
 
 class EpollLoop;
 class BufferPool;
@@ -95,7 +96,6 @@ private:
     void send_rtp_trigger();
     void send_zte_heartbeat();
     void send_http_response();
-    bool get_rtp_payload_offset(uint8_t *buf, size_t &recv_len, size_t &payload_offset);
 
     void handle_rtsp(uint32_t event);
     void handle_rtp(uint32_t event);
@@ -141,7 +141,6 @@ private:
     uint16_t rtp_port_;
     uint16_t nat_wan_port = 0;
     bool is_init_ok = false;
-    bool wait_for_keyframe_{true};
 
     size_t tcp_send_offset_ = 0;
     size_t payload_offset = 0;
@@ -174,4 +173,5 @@ private:
 
     mutable BandwidthEstimator upstream_est_;
     mutable BandwidthEstimator downstream_est_;
+    std::unique_ptr<RtpPipeline> rtp_pipeline_;
 };

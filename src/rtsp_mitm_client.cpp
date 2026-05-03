@@ -61,12 +61,12 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
       downstream_ctx_(std::make_unique<SocketCtx>(
           client_fd,
           [this](uint32_t ev) { handle_downstream(ev); })),
-      client_addr_(client_addr)
+      client_addr_(client_addr),
+      rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
     // Remove the simple EPOLLIN watch that was set by the accept handler;
     // we will re-register it ourselves.
     loop_->remove(client_fd);
-    wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
 
     // Peek at the first bytes to extract the RTSP URL from the request line.
     // The first request was already recv'd and passed in as first_request.
@@ -689,36 +689,10 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
             Statistics::getInstance().addUpstreamBytes(n);
             size_t actual_n = static_cast<size_t>(n);
 
-            if (wait_for_keyframe_)
-            {
-                size_t payload_off = 12 + (buf[0] & 0x0F) * 4;
-                if (buf[0] & 0x10 && payload_off + 4 <= actual_n) {
-                    uint16_t ext_len = ntohs(*reinterpret_cast<uint16_t *>(buf.get() + payload_off + 2));
-                    payload_off += 4 + 4 * ext_len;
-                }
-                
-                bool found = false;
-                if (payload_off + 188 <= actual_n && buf[payload_off] == 0x47)
-                {
-                    for (size_t i = 0; payload_off + i + 188 <= actual_n; i += 188)
-                    {
-                        uint8_t *ts = buf.get() + payload_off + i;
-                        uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
-                        if (pid == 0) { found = true; break; }
-                        uint8_t afc = (ts[3] & 0x30) >> 4;
-                        if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) { found = true; break; }
-                    }
-                }
-                if (found) {
-                    Logger::debug("[MITM] Keyframe/PAT found, start forwarding");
-                    wait_for_keyframe_ = false;
-                } else {
-                    pool_.release(std::move(buf));
-                    continue;
-                }
+            if (!rtp_pipeline_->process(buf.get(), actual_n)) {
+                pool_.release(std::move(buf));
+                continue;
             }
-
-            strip_rtp_padding_and_ts_null(buf.get(), actual_n);
             n = static_cast<ssize_t>(actual_n);
             
             if (n > 0) {
@@ -834,58 +808,24 @@ void RTSPMitmClient::handle_interleaved_from_upstream(uint8_t channel, const uin
         upstream_est_.addBytes(len);
         Statistics::getInstance().addUpstreamBytes(len);
 
-        if (wait_for_keyframe_)
-        {
-            size_t payload_off = 12 + (data[0] & 0x0F) * 4;
-            if (data[0] & 0x10 && payload_off + 4 <= len) {
-                uint16_t ext_len = ntohs(*reinterpret_cast<const uint16_t *>(data + payload_off + 2));
-                payload_off += 4 + 4 * ext_len;
-            }
-            
-            bool found = false;
-            if (payload_off + 188 <= len && data[payload_off] == 0x47)
-            {
-                for (size_t i = 0; payload_off + i + 188 <= len; i += 188)
-                {
-                    const uint8_t *ts = data + payload_off + i;
-                    uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
-                    if (pid == 0) { found = true; break; }
-                    uint8_t afc = (ts[3] & 0x30) >> 4;
-                    if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) { found = true; break; }
-                }
-            }
-            if (found) {
-                Logger::debug("[MITM] Keyframe/PAT found (TCP), start forwarding");
-                wait_for_keyframe_ = false;
-            } else {
-                return;
-            }
+        auto buf = pool_.acquire();
+        size_t n = std::min(len, pool_.get_buffer_size());
+        memcpy(buf.get(), data, n);
+
+        if (!rtp_pipeline_->process(buf.get(), n)) {
+            pool_.release(std::move(buf));
+            return;
         }
 
-        // We might need to copy if we want to modify the data
-        if (is_downstream_tcp_) {
-            // send_interleaved_downstream already copies to a pool buffer, 
-            // but we need to modify the data before that if we want to strip.
-            // Let's copy it first.
-            auto buf = pool_.acquire();
-            size_t n = std::min(len, pool_.get_buffer_size());
-            memcpy(buf.get(), data, n);
-            strip_rtp_padding_and_ts_null(buf.get(), n);
-            if (n > 0) {
+        if (n > 0) {
+            if (is_downstream_tcp_) {
                 send_interleaved_downstream(ds_interleaved_rtp_, buf.get(), n);
-            }
-            pool_.release(std::move(buf));
-        } else if (client_rtp_addr_.sin_port != 0) {
-            auto buf = pool_.acquire();
-            size_t n = std::min(len, pool_.get_buffer_size());
-            memcpy(buf.get(), data, n);
-            strip_rtp_padding_and_ts_null(buf.get(), n);
-            if (n > 0) {
+            } else if (client_rtp_addr_.sin_port != 0) {
                 sendto(rtp_ds_fd_, buf.get(), n, 0, (sockaddr *)&client_rtp_addr_, sizeof(client_rtp_addr_));
                 Statistics::getInstance().addDownstreamBytes(n);
             }
-            pool_.release(std::move(buf));
         }
+        pool_.release(std::move(buf));
     }
     else if (channel == us_interleaved_rtcp_)
     {
@@ -1315,25 +1255,20 @@ void RTSPMitmClient::on_upstream_readable()
         // Apply robust response patching (Transport, Content-Base, etc.)
         resp = patch_response_for_client(resp);
 
-        // Detect PLAY response -> start streaming state.
+        // Detect PLAY response -> start streaming state
         if (status == 200 && pending_play_)
         {
             pending_play_ = false;
-            if (state_ != State::STREAMING)
-            {
-                state_ = State::STREAMING;
-                wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
-                Logger::debug("[MITM] Streaming started: " + ctx_.rtsp_url +
-                             " -> " + std::string(inet_ntoa(client_addr_.sin_addr)) +
-                             ":" + std::to_string(ntohs(client_addr_.sin_port)));
-                init_timer_fd();
-                
-                if (!is_upstream_tcp_) {
-                    if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
-                        send_zte_heartbeat();
-                    } else {
-                        send_rtp_trigger();
-                    }
+            Logger::debug(std::string("[MITM] Streaming Start: " + ctx_.rtsp_url));
+            rtp_pipeline_->reset();
+            init_timer_fd();
+            state_ = State::STREAMING;
+            
+            if (!is_upstream_tcp_) {
+                if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "zte") {
+                    send_zte_heartbeat();
+                } else {
+                    send_rtp_trigger();
                 }
             }
         }
@@ -1493,48 +1428,4 @@ json RTSPMitmClient::get_info() const
     info["upstream_bandwidth"] = (uint64_t)upstream_est_.getBandwidth();
     info["downstream_bandwidth"] = (uint64_t)downstream_est_.getBandwidth();
     return info;
-}
-void RTSPMitmClient::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len)
-{
-    if (len < 12 || (buf[0] & 0xC0) != 0x80) return;
-
-    size_t payload_offset = 12 + (buf[0] & 0x0F) * 4;
-    if (buf[0] & 0x10) { // Extension
-        if (payload_offset + 4 > len) return;
-        uint16_t ext_len = ntohs(*reinterpret_cast<uint16_t *>(buf + payload_offset + 2));
-        payload_offset += 4 + 4 * ext_len;
-    }
-    if (payload_offset > len) return;
-
-    // 1. Strip RTP Padding
-    if (buf[0] & 0x20) {
-        uint8_t padding_len = buf[len - 1];
-        if (padding_len > 0 && padding_len <= (len - payload_offset)) {
-            len -= padding_len;
-        }
-        buf[0] &= ~0x20; // ALWAYS clear padding bit if it was set
-    }
-
-    // 2. Strip TS Null Packets (PID 0x1FFF)
-    if (ServerConfig::isStripPadding()) {
-        size_t payload_len = len - payload_offset;
-        // Check if it's MPEG-TS (starts with 0x47)
-        if (payload_len >= 188 && buf[payload_offset] == 0x47) {
-            size_t new_payload_len = 0;
-            for (size_t i = 0; i + 188 <= payload_len; i += 188) {
-                uint16_t pid = ((buf[payload_offset + i + 1] & 0x1F) << 8) | buf[payload_offset + i + 2];
-                if (pid != 0x1FFF) {
-                    if (new_payload_len != i) {
-                        memmove(buf + payload_offset + new_payload_len, buf + payload_offset + i, 188);
-                    }
-                    new_payload_len += 188;
-                }
-            }
-            len = payload_offset + new_payload_len;
-            if (new_payload_len == 0) len = 0; // Drop entire packet if only null packets
-            
-            // Just in case, ensure padding bit is clear if we modified the packet
-            buf[0] &= ~0x20; 
-        }
-    }
 }
