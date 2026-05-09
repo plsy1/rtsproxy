@@ -63,20 +63,7 @@ chmod +x build_openwrt.sh
 > [!TIP]
 > **静态资源放行**：开启鉴权后，代理会自动放行 WebUI 所需的 JS/CSS 资源，确保监控页面在未授权前也能正确加载基础框架。
 
-### 2. 动态 URL 重写 (`config.json`)
-当访问路径以 `/tv/` 开头时，代理将根据规则自动变换上游地址。支持以下操作：
-
-| 操作类型 | 说明 | 示例 |
-| :--- | :--- | :--- |
-| **`{number}`** | 匹配 URL 中的任意连续数字 | `channel_{number}` |
-| **`remove`** | 移除特定路径片段 | 移除冗余的 `.sdp` 后缀 |
-| **`replace`** | 字符串或模式替换 | `/iptv/import` -> `/iptv` |
-| **`timeshift`** | **时间平移**：自动计算回看偏移 | `shift_hours: -8` (北京时间转 GMT) |
-
-> [!NOTE]
-> **递归环回检测**：RTSProxy 具备内置的环回保护机制。即使未配置黑名单，它也会自动识别并拒绝指向其自身监听端口的请求，防止产生死循环。
-
-### 3. 命令行参数详解
+### 2. 命令行参数详解
 
 ```bash
 Options:
@@ -104,6 +91,55 @@ Options:
 > [!TIP]
 > **多网口绑定 (Multi-Interface Support)**：
 > 你可以通过 `--listen-interface` 指定服务在特定的本地网口（如 `br-lan`）监听，同时通过 `--http-interface` 或 `--mitm-interface` 指定上游拉流流量走不同的物理网口（如 `eth1` 专网），实现真正的内外网隔离。
+
+---
+
+## 配置文件说明 (`config.json`)
+
+`config.json` 是 RTSProxy 的核心配置文件，支持全局参数、URL 重写规则及安全黑名单设置。
+
+### 1. 全局设置 (`settings`)
+
+| 字段 | 类型 | 说明 | 默认值 |
+| :--- | :--- | :--- | :--- |
+| `port` | Number | 代理监听端口 | `8554` |
+| `enable_nat` | Boolean | 是否开启 NAT 穿越 | `false` |
+| `nat_method` | String | NAT 穿越模式 (`stun`, `zte`) | `stun` |
+| `buffer_pool_count` | Number | 预分配内存池块数量 | `8192` |
+| `buffer_pool_block_size` | Number | 每块内存的大小 (字节) | `2048` |
+| `log_level` | String | 日志等级 (`error`, `warn`, `info`, `debug`) | `info` |
+| `log_file` | String | 日志文件路径 (为空则输出至控制台) | `""` |
+| `log_lines` | Number | 日志文件最大滚动行数 | `10000` |
+| `strip_padding` | Boolean | 是否剥离 MPEG-TS 空包以节省带宽 | `false` |
+| `wait_keyframe` | Boolean | 是否等待关键帧后再开始转发 (防绿屏) | `false` |
+| `watchdog` | Boolean | 开启进程监控，崩溃后自动重启 | `false` |
+| `daemon` | Boolean | 是否以守护进程方式后台运行 | `false` |
+| `auth_token` | String | 访问管理后台或接口的鉴权 Token | `""` |
+| `listen_interface` | String | 指定服务监听的本地网口 (如 `br-lan`) | `""` |
+| `http_interface` | String | HTTP 模式拉流时使用的出口网口 | `""` |
+| `mitm_interface` | String | MITM 模式拉流时使用的出口网口 | `""` |
+| `stun_host` | String | STUN 服务器地址 | `stun.l.google.com` |
+| `stun_port` | Number | STUN 服务器端口 | `19302` |
+
+### 2. URL 重写规则 (`replace_templates`)
+
+当请求路径匹配特定规则时，代理将自动变换上游地址。支持以下操作：
+
+| 操作类型 (`action`) | 说明 | 示例配置项 |
+| :--- | :--- | :--- |
+| `remove` | 移除匹配的路径片段 | `match: "/.sdp"` |
+| `replace` | 字符串或模式替换 | `match: "/iptv/import", replacement: "/iptv"` |
+| `timeshift` | **时间平移**：自动偏移回看地址中的时间戳 | `shift_hours: -8` (用于 GMT 转换) |
+
+**通配符支持**：
+- `{number}`: 匹配任意连续数字（如频道 ID、时间戳）。
+
+### 3. 安全黑名单 (`blacklist`)
+
+包含一系列 CIDR 格式的 IP 地址段。代理将**拒绝**向这些地址发起上游连接，用于防止内网穿透攻击或递归环回死循环。
+
+> [!NOTE]
+> **递归环回检测**：即使未配置黑名单，RTSProxy 也会自动识别并拒绝指向其自身监听端口的请求。
 
 ---
 
