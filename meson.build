@@ -19,28 +19,36 @@ cpp = meson.get_compiler('cpp')
 atomic_dep = cpp.find_library('atomic', required: false)
 
 src_dir = 'src'
-
 inc_dir = 'include'
 
 executable(
     'rtsproxy',
     files(
         src_dir / 'main.cpp',
-        src_dir / 'epoll_loop.cpp',
-        src_dir / 'rtsp_client.cpp',
-        src_dir / 'rtsp_mitm_client.cpp',
-        src_dir / 'rtsp_parser.cpp',
-        src_dir / 'stun_client.cpp',
-        src_dir / 'http_handle.cpp',
-        src_dir / 'rtsp_handle.cpp',
-        src_dir / 'logger.cpp',
-        src_dir / 'server_config.cpp',
-        src_dir / 'http_parser.cpp',
-        src_dir / 'socket_helper.cpp',
-        src_dir / 'blacklist_checker.cpp',
-        src_dir / 'dns_resolver.cpp',
-        src_dir / 'port_pool.cpp',
-        src_dir / 'rtp_pipeline.cpp',
+        # Core
+        src_dir / 'core/epoll_loop.cpp',
+        src_dir / 'core/logger.cpp',
+        src_dir / 'core/server_config.cpp',
+        src_dir / 'core/proxy_server.cpp',
+        src_dir / 'core/port_pool.cpp',
+        # Handlers
+        src_dir / 'handlers/master_handle.cpp',
+        src_dir / 'handlers/api_handle.cpp',
+        src_dir / 'handlers/rtsp_to_http_handle.cpp',
+        src_dir / 'handlers/rtsp_to_rtsp_handle.cpp',
+        # Clients
+        src_dir / 'clients/rtsp_to_http_client.cpp',
+        src_dir / 'clients/rtsp_to_rtsp_client.cpp',
+        # Protocol
+        src_dir / 'protocol/request_parser.cpp',
+        src_dir / 'protocol/rtsp_parser.cpp',
+        src_dir / 'protocol/rtp_pipeline.cpp',
+        # Utils
+        src_dir / 'utils/socket_helper.cpp',
+        src_dir / 'utils/blacklist_checker.cpp',
+        src_dir / 'utils/dns_resolver.cpp',
+        src_dir / 'utils/url_rewriter.cpp',
+        src_dir / 'utils/stun_client.cpp',
     ),
     include_directories: include_directories(inc_dir),
     install: true,
