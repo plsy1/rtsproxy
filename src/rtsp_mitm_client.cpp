@@ -758,6 +758,12 @@ void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t 
 {
     if (closed_ || downstream_fd_ < 0) return;
 
+    size_t pool_block_size = pool_.get_buffer_size();
+    if (len + 4 > pool_block_size) {
+        Logger::warn("[MITM] Packet too large, truncated (" + std::to_string(len + 4) + " > " + std::to_string(pool_block_size) + ")");
+        len = pool_block_size - 4;
+    }
+
     auto buf = pool_.acquire();
     buf[0] = '$';
     buf[1] = static_cast<uint8_t>(channel);
