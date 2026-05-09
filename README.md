@@ -60,6 +60,9 @@ chmod +x build_openwrt.sh
 - **默认路径**：`http://<proxy-ip>:<port>/admin/`
 - **鉴权示例**：`http://<proxy-ip>:<port>/admin/?token=your_token` (若开启了 `--auth-token`)
 
+> [!TIP]
+> **静态资源放行**：开启鉴权后，代理会自动放行 WebUI 所需的 JS/CSS 资源，确保监控页面在未授权前也能正确加载基础框架。
+
 ### 2. 动态 URL 重写 (`config.json`)
 当访问路径以 `/tv/` 开头时，代理将根据规则自动变换上游地址。支持以下操作：
 
@@ -69,6 +72,9 @@ chmod +x build_openwrt.sh
 | **`remove`** | 移除特定路径片段 | 移除冗余的 `.sdp` 后缀 |
 | **`replace`** | 字符串或模式替换 | `/iptv/import` -> `/iptv` |
 | **`timeshift`** | **时间平移**：自动计算回看偏移 | `shift_hours: -8` (北京时间转 GMT) |
+
+> [!NOTE]
+> **递归环回检测**：RTSProxy 具备内置的环回保护机制。即使未配置黑名单，它也会自动识别并拒绝指向其自身监听端口的请求，防止产生死循环。
 
 ### 3. 命令行参数详解
 
@@ -94,6 +100,10 @@ Options:
       --strip-padding           开启 MPEG-TS 空包剥离 (带宽优化)
       --wait-keyframe           开启起播关键帧等待 (防止起播初始绿屏)
 ```
+
+> [!TIP]
+> **多网口绑定 (Multi-Interface Support)**：
+> 你可以通过 `--listen-interface` 指定服务在特定的本地网口（如 `br-lan`）监听，同时通过 `--http-interface` 或 `--mitm-interface` 指定上游拉流流量走不同的物理网口（如 `eth1` 专网），实现真正的内外网隔离。
 
 ---
 
