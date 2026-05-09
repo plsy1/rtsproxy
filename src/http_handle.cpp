@@ -8,6 +8,8 @@
 #include "../include/http_parser.h"
 #include "../include/server_config.h"
 #include "../include/3rd/json.hpp"
+#include "../include/rtsp_parser.h"
+#include "../include/blacklist_checker.h"
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <string>
@@ -268,15 +270,50 @@ void handle_http_request(int client_fd, sockaddr_in client_addr, EpollLoop *loop
 
     Logger::debug("[SERVER] New http client request: " + client_host + " -> " + rtsp_url);
 
-    std::unique_ptr<IClient> client = std::make_unique<RTSPClient>(loop, pool, client_addr, client_fd, rtsp_url);
-
-    loop->add_client_to_map(client_fd, std::move(client));
-
-    loop->get_client_from_map(client_fd)->set_on_closed_callback([client_fd, loop, client_host]()
-                                                                 {
-    Logger::debug("[SERVER] Client disconnect: " + client_host);
-    loop->add_task([client_fd, loop]()
+    try
     {
-        loop->remove_client_from_map(client_fd);
-    }); });
+        rtspCtx ctx;
+        if (rtspParser::parse_url(rtsp_url, ctx) != 0)
+        {
+            throw std::runtime_error("Failed to parse RTSP URL: " + rtsp_url);
+        }
+
+        if (BlacklistChecker::is_blacklisted(ctx.server_ip))
+        {
+            throw std::runtime_error("Connection to upstream " + ctx.server_ip + " is forbidden by blacklist.");
+        }
+
+        // Loopback detection
+        {
+            struct sockaddr_in local_addr{};
+            socklen_t addr_len = sizeof(local_addr);
+            if (getsockname(client_fd, (struct sockaddr *)&local_addr, &addr_len) == 0)
+            {
+                std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
+                uint16_t proxy_port = ntohs(local_addr.sin_port);
+                if ((ctx.server_ip == "127.0.0.1" || ctx.server_ip == "localhost" || ctx.server_ip == proxy_ip) &&
+                    ctx.server_rtsp_port == proxy_port)
+                {
+                    throw std::runtime_error("Recursive connection detected: URL points back to proxy itself.");
+                }
+            }
+        }
+
+        std::unique_ptr<IClient> client = std::make_unique<RTSPClient>(loop, pool, client_addr, client_fd, ctx);
+        loop->add_client_to_map(client_fd, std::move(client));
+
+        loop->get_client_from_map(client_fd)->set_on_closed_callback([client_fd, loop, client_host]()
+                                                                     {
+            Logger::debug("[SERVER] Client disconnect: " + client_host);
+            loop->add_task([client_fd, loop]()
+            {
+                loop->remove_client_from_map(client_fd);
+            });
+        });
+    }
+    catch (const std::exception &e)
+    {
+        Logger::error("[SERVER] Failed to initialize RTSP client for " + client_host + ": " + e.what());
+        close(client_fd);
+    }
 }

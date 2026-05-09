@@ -82,8 +82,9 @@ void handle_rtsp_request(int client_fd, sockaddr_in client_addr,
 
     try
     {
+        auto config = RTSPMitmClient::resolve_upstream(first_request, client_fd);
         auto client = std::make_unique<RTSPMitmClient>(
-            loop, pool, client_addr, client_fd, first_request);
+            loop, pool, client_addr, client_fd, config, first_request);
 
         loop->add_client_to_map(client_fd, std::move(client));
 

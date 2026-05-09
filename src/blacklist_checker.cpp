@@ -1,5 +1,6 @@
 #include "../include/blacklist_checker.h"
 #include "../include/server_config.h"
+#include "../include/dns_resolver.h"
 #include <arpa/inet.h>
 #include <cstring>
 #include <vector>
@@ -9,23 +10,33 @@ bool BlacklistChecker::is_blacklisted(const std::string &host)
     const auto &blacklist = ServerConfig::getBlacklist();
     if (blacklist.empty()) return false;
 
-    for (const auto &pattern : blacklist)
+    auto check_once = [&](const std::string &h) -> bool {
+        for (const auto &pattern : blacklist)
+        {
+            if (pattern.find('/') != std::string::npos)
+            {
+                if (match_cidr(h, pattern)) return true;
+            }
+            else if (pattern.find('*') != std::string::npos)
+            {
+                if (match_wildcard(h, pattern)) return true;
+            }
+            else
+            {
+                if (h == pattern) return true;
+            }
+        }
+        return false;
+    };
+
+    // 1. First check with the original host string (matches domain patterns or literal IPs)
+    if (check_once(host)) return true;
+
+    // 2. Resolve host to IPs and check each
+    auto ips = DNSResolver::resolve_ipv4(host);
+    for (const auto &ip : ips)
     {
-        if (pattern.find('/') != std::string::npos)
-        {
-            // Likely CIDR
-            if (match_cidr(host, pattern)) return true;
-        }
-        else if (pattern.find('*') != std::string::npos)
-        {
-            // Domain Wildcard
-            if (match_wildcard(host, pattern)) return true;
-        }
-        else
-        {
-            // Exact match
-            if (host == pattern) return true;
-        }
+        if (check_once(ip)) return true;
     }
 
     return false;

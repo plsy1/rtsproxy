@@ -222,7 +222,11 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
         return -1;
 
     size_t slash = url.find('/', 7);
-    std::string hostport = url.substr(7, slash - 7);
+    std::string hostport = url.substr(7, (slash == std::string::npos) ? std::string::npos : slash - 7);
+    if (hostport.empty())
+    {
+        return -1;
+    }
     size_t colon = hostport.find(':');
 
     try

@@ -27,12 +27,22 @@ class SocketCtx;
  * upstream responses back to the client, and forward RTP/RTCP packets
  * in both directions.
  */
+struct RtspMitmConfig
+{
+    rtspCtx ctx;
+    std::string proxy_uri_prefix;
+    std::string upstream_uri_base;
+};
+
 class RTSPMitmClient : public IClient
 {
 public:
     explicit RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
                             const sockaddr_in &client_addr, int client_fd,
+                            const RtspMitmConfig &config,
                             const std::string &first_request);
+
+    static RtspMitmConfig resolve_upstream(const std::string &first_request, int client_fd);
     ~RTSPMitmClient() override;
 
     void set_on_closed_callback(ClosedCallback cb) override;

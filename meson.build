@@ -38,6 +38,7 @@ executable(
         src_dir / 'http_parser.cpp',
         src_dir / 'socket_helper.cpp',
         src_dir / 'blacklist_checker.cpp',
+        src_dir / 'dns_resolver.cpp',
         src_dir / 'port_pool.cpp',
         src_dir / 'rtp_pipeline.cpp',
     ),

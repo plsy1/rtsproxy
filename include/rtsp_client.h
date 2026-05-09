@@ -4,11 +4,9 @@
 #include "../include/iclient.h"
 #include <string>
 #include <queue>
-#include <vector>
-#include <map>
+#include <queue>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <functional>
 #include <memory>
 #include "rtp_pipeline.h"
 
@@ -20,7 +18,7 @@ class Packet;
 class RTSPClient : public IClient
 {
 public:
-    explicit RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const std::string &rtsp_url);
+    explicit RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const rtspCtx &ctx);
     ~RTSPClient() override;
 
     void set_on_closed_callback(ClosedCallback cb) override;

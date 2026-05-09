@@ -9,7 +9,6 @@
 #include "../include/stun_client.h"
 #include "../include/utils.h"
 #include "../include/rtsp_parser.h"
-#include "../include/blacklist_checker.h"
 #include "../include/socket_helper.h"
 #include "../include/port_pool.h"
 #include <sys/socket.h>
@@ -19,7 +18,7 @@
 #include <cstring>
 #include <sys/timerfd.h>
 
-RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const std::string &rtsp_url)
+RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const rtspCtx &ctx)
     : loop(loop),
       buffer_pool_(pool),
       client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
@@ -27,43 +26,10 @@ RTSPClient::RTSPClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &cli
       start_time_(std::chrono::steady_clock::now()),
       client_addr_(client_addr),
       client_fd_(client_fd, loop),
+      ctx(ctx),
       rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
-    ctx.rtsp_url = rtsp_url;
-
     loop->remove(client_fd);
-
-    if (rtspParser::parse_url(rtsp_url, ctx) != 0)
-    {
-        if (on_closed_callback_) on_closed_callback_();
-        return;
-    }
-
-    if (BlacklistChecker::is_blacklisted(ctx.server_ip))
-    {
-        Logger::error("[RTSP] Connection to upstream " + ctx.server_ip + " is forbidden by blacklist.");
-        if (on_closed_callback_) on_closed_callback_();
-        return;
-    }
-
-    // Loopback detection: Prevent infinite recursion if the client
-    // points the proxy back to itself.
-    {
-        struct sockaddr_in local_addr{};
-        socklen_t addr_len = sizeof(local_addr);
-        if (getsockname(client_fd, (struct sockaddr *)&local_addr, &addr_len) == 0)
-        {
-            std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
-            uint16_t proxy_port = ntohs(local_addr.sin_port);
-            if ((ctx.server_ip == "127.0.0.1" || ctx.server_ip == "localhost" || ctx.server_ip == proxy_ip) &&
-                ctx.server_rtsp_port == proxy_port)
-            {
-                Logger::error("[RTSP] Recursive connection detected: URL points back to proxy itself.");
-                if (on_closed_callback_) on_closed_callback_();
-                return;
-            }
-        }
-    }
 
     loop->set(client_ctx_.get(), client_fd, EPOLLRDHUP | EPOLLHUP | EPOLLERR);
 

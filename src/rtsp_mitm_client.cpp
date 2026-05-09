@@ -54,6 +54,7 @@ static std::string replace_header(const std::string &msg,
 
 RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
                                const sockaddr_in &client_addr, int client_fd,
+                               const RtspMitmConfig &config,
                                const std::string &first_request)
     : loop_(loop),
       pool_(pool),
@@ -67,124 +68,14 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
       rtp_ds_fd_(-1, loop),
       rtcp_ds_fd_(-1, loop),
       timer_fd_(-1, loop),
+      ctx_(config.ctx),
+      proxy_uri_prefix_(config.proxy_uri_prefix),
+      upstream_uri_base_(config.upstream_uri_base),
       rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
     // Remove the simple EPOLLIN watch that was set by the accept handler;
     // we will re-register it ourselves.
     loop_->remove(client_fd);
-
-    // Peek at the first bytes to extract the RTSP URL from the request line.
-    // The first request was already recv'd and passed in as first_request.
-    // We need to figure out where the upstream server is.
-    //
-    // The client sends something like:
-    //   OPTIONS rtsp://192.168.1.100:554/stream RTSP/1.0
-    //
-    std::string url;
-    std::istringstream ss(first_request);
-    std::string method, uri, version;
-    ss >> method >> uri >> version;
-
-    if (uri.rfind("rtsp://", 0) != 0)
-    {
-        throw std::runtime_error("First request does not contain a valid rtsp:// URI: " + uri);
-    }
-
-    ctx_.rtsp_url = uri;
-    if (rtspParser::parse_url(uri, ctx_) != 0)
-    {
-        throw std::runtime_error("Failed to parse RTSP URL: " + uri);
-    }
-
-    // ---------------------------------------------------------------
-    // Loopback detection & Proxy-path URL format:
-    //   rtsp://proxy-host:port/real-host:port/actual/path
-    // ---------------------------------------------------------------
-    {
-        std::string path = ctx_.path;
-        std::string rewritten_rtsp_url;
-        bool is_prefixed = false;
-
-        if (path.find("/rtp/") == 0 || path.find("/tv/") == 0) {
-            if (httpParser::parse_http_url(path, rewritten_rtsp_url)) {
-                is_prefixed = true;
-            }
-        }
-
-        if (is_prefixed)
-        {
-            rtspCtx real_ctx;
-            if (rtspParser::parse_url(rewritten_rtsp_url, real_ctx) == 0) {
-                size_t path_pos = uri.find(real_ctx.path);
-                if (path_pos != std::string::npos) {
-                    proxy_uri_prefix_ = uri.substr(0, path_pos);
-                    upstream_uri_base_ = "rtsp://" + real_ctx.server_ip + ":" + std::to_string(real_ctx.server_rtsp_port);
-                    ctx_ = real_ctx;
-                    Logger::debug("[MITM] Prefixed URL detected. Upstream: " + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port) + ctx_.path);
-                }
-            }
-        }
-        else if (path.size() > 1)
-        {
-            std::string stripped = path.substr(1); // remove leading '/'
-            size_t slash = stripped.find('/');
-            std::string first_seg = (slash != std::string::npos)
-                                        ? stripped.substr(0, slash)
-                                        : stripped;
-            std::string real_path = (slash != std::string::npos)
-                                        ? stripped.substr(slash)
-                                        : "/";
-
-            size_t colon = first_seg.rfind(':');
-            if (colon != std::string::npos && colon > 0 && colon < first_seg.size() - 1)
-            {
-                std::string real_host = first_seg.substr(0, colon);
-                std::string port_str  = first_seg.substr(colon + 1);
-                bool all_digits = !port_str.empty() &&
-                                  std::all_of(port_str.begin(), port_str.end(), ::isdigit);
-                if (all_digits)
-                {
-                    // Store proxy prefix and real upstream base for URI rewriting.
-                    proxy_uri_prefix_  = "rtsp://" + ctx_.server_ip + ":" +
-                                         std::to_string(ctx_.server_rtsp_port) +
-                                         "/" + first_seg; // proxy addr + /real-host:port
-                    upstream_uri_base_ = "rtsp://" + real_host + ":" + port_str;
-
-                    // Update ctx_ to point at the real upstream server.
-                    ctx_.server_ip        = real_host;
-                    ctx_.server_rtsp_port = static_cast<uint16_t>(std::stoi(port_str));
-                    ctx_.path             = real_path;
-                    ctx_.rtsp_url         = upstream_uri_base_ + real_path;
-
-                    Logger::debug("[MITM] Proxy-path URL detected. Upstream: " +
-                                 ctx_.server_ip + ":" +
-                                 std::to_string(ctx_.server_rtsp_port) +
-                                 ctx_.path);
-                }
-            }
-        }
-
-        // Now check the blacklist against the FINAL upstream server IP.
-        if (BlacklistChecker::is_blacklisted(ctx_.server_ip))
-        {
-            throw std::runtime_error("Connection to upstream " + ctx_.server_ip + " is forbidden by blacklist.");
-        }
-
-        // Final Loopback Check ...
-        // it is a recursive connection.
-        struct sockaddr_in local_addr{};
-        socklen_t addr_len = sizeof(local_addr);
-        if (getsockname(downstream_fd_, (struct sockaddr *)&local_addr, &addr_len) == 0)
-        {
-            std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
-            uint16_t proxy_port = ntohs(local_addr.sin_port);
-            if ((ctx_.server_ip == "127.0.0.1" || ctx_.server_ip == "localhost" || ctx_.server_ip == proxy_ip) &&
-                ctx_.server_rtsp_port == proxy_port)
-            {
-                throw std::runtime_error("Recursive connection detected: URL points back to proxy itself.");
-            }
-        }
-    }
 
     // Stash the first request so it gets forwarded once the upstream TCP
     // connection is established.
@@ -1439,4 +1330,91 @@ json RTSPMitmClient::get_info() const
     info["upstream_bandwidth"] = (uint64_t)upstream_est_.getBandwidth();
     info["downstream_bandwidth"] = (uint64_t)downstream_est_.getBandwidth();
     return info;
+}
+
+RtspMitmConfig RTSPMitmClient::resolve_upstream(const std::string &first_request, int client_fd)
+{
+    RtspMitmConfig config;
+    std::string url;
+    std::istringstream ss(first_request);
+    std::string method, uri, version;
+    ss >> method >> uri >> version;
+
+    if (uri.rfind("rtsp://", 0) != 0)
+    {
+        throw std::runtime_error("First request does not contain a valid rtsp:// URI: " + uri);
+    }
+
+    config.ctx.rtsp_url = uri;
+    if (rtspParser::parse_url(uri, config.ctx) != 0)
+    {
+        throw std::runtime_error("Failed to parse RTSP URL: " + uri);
+    }
+
+    std::string path = config.ctx.path;
+    std::string rewritten_rtsp_url;
+    bool is_prefixed = false;
+
+    if (path.find("/rtp/") == 0 || path.find("/tv/") == 0) {
+        if (httpParser::parse_http_url(path, rewritten_rtsp_url)) {
+            is_prefixed = true;
+        }
+    }
+
+    if (is_prefixed)
+    {
+        rtspCtx real_ctx;
+        if (rtspParser::parse_url(rewritten_rtsp_url, real_ctx) == 0) {
+            size_t path_pos = uri.find(real_ctx.path);
+            if (path_pos != std::string::npos) {
+                config.proxy_uri_prefix = uri.substr(0, path_pos);
+                config.upstream_uri_base = "rtsp://" + real_ctx.server_ip + ":" + std::to_string(real_ctx.server_rtsp_port);
+                config.ctx = real_ctx;
+            }
+        }
+    }
+    else if (path.size() > 1)
+    {
+        std::string stripped = path.substr(1);
+        size_t slash = stripped.find('/');
+        std::string first_seg = (slash != std::string::npos) ? stripped.substr(0, slash) : stripped;
+        std::string real_path = (slash != std::string::npos) ? stripped.substr(slash) : "/";
+
+        size_t colon = first_seg.rfind(':');
+        if (colon != std::string::npos && colon > 0 && colon < first_seg.size() - 1)
+        {
+            std::string real_host = first_seg.substr(0, colon);
+            std::string port_str  = first_seg.substr(colon + 1);
+            bool all_digits = !port_str.empty() && std::all_of(port_str.begin(), port_str.end(), ::isdigit);
+            if (all_digits)
+            {
+                config.proxy_uri_prefix  = "rtsp://" + config.ctx.server_ip + ":" + std::to_string(config.ctx.server_rtsp_port) + "/" + first_seg;
+                config.upstream_uri_base = "rtsp://" + real_host + ":" + port_str;
+                config.ctx.server_ip        = real_host;
+                config.ctx.server_rtsp_port = static_cast<uint16_t>(std::stoi(port_str));
+                config.ctx.path             = real_path;
+                config.ctx.rtsp_url         = config.upstream_uri_base + real_path;
+            }
+        }
+    }
+
+    if (BlacklistChecker::is_blacklisted(config.ctx.server_ip))
+    {
+        throw std::runtime_error("Connection to upstream " + config.ctx.server_ip + " is forbidden by blacklist.");
+    }
+
+    struct sockaddr_in local_addr{};
+    socklen_t addr_len = sizeof(local_addr);
+    if (getsockname(client_fd, (struct sockaddr *)&local_addr, &addr_len) == 0)
+    {
+        std::string proxy_ip = inet_ntoa(local_addr.sin_addr);
+        uint16_t proxy_port = ntohs(local_addr.sin_port);
+        if ((config.ctx.server_ip == "127.0.0.1" || config.ctx.server_ip == "localhost" || config.ctx.server_ip == proxy_ip) &&
+            config.ctx.server_rtsp_port == proxy_port)
+        {
+            throw std::runtime_error("Recursive connection detected: URL points back to proxy itself.");
+        }
+    }
+
+    return config;
 }

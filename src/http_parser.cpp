@@ -143,6 +143,7 @@ void httpParser::setTemplates(const nlohmann::json &templates)
 
 bool httpParser::parse_rtp_url(const std::string &url, std::string &rtsp_url)
 {
+    if (url.length() <= 5) return false;
     rtsp_url = url.substr(5);
     rtsp_url = "rtsp://" + rtsp_url;
 
@@ -157,6 +158,7 @@ bool httpParser::parse_tv_url(const std::string &url, std::string &rtsp_url)
     if (query_pos == std::string::npos)
     {
         // for live link
+        if (url.length() <= 4) return false;
         rtsp_url = url.substr(4);
         rtsp_url = "rtsp://" + rtsp_url;
         return true;
@@ -198,6 +200,7 @@ bool httpParser::parse_tv_url(const std::string &url, std::string &rtsp_url)
             }
         }
 
+        if (replaced_url.length() <= 4) return false;
         rtsp_url = replaced_url.substr(4);
         rtsp_url = "rtsp://" + rtsp_url;
 
