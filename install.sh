@@ -73,6 +73,8 @@ if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
     case "$OWRT_ARCH" in
         x86_64) IPK_ARCH_TAG="x64" ;;
         aarch64_*) IPK_ARCH_TAG="aarch64" ;;
+        mips_24kc) IPK_ARCH_TAG="mips_24kc" ;;
+        mipsel_24kc) IPK_ARCH_TAG="mipsel_24kc" ;;
     esac
     if [ -n "$IPK_ARCH_TAG" ]; then
         CORE_IPK="rtsproxy_${VERSION}_openwrt-${OWRT_MAJOR}-${IPK_ARCH_TAG}.ipk"
