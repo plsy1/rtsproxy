@@ -301,6 +301,9 @@ int main(int argc, char *argv[])
                             // Assume RTSP for other methods like OPTIONS, DESCRIBE, SETUP...
                             handle_rtsp_request(client_fd, client_addr, &loop, pool);
                         }
+                    } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                        loop.remove(client_fd);
+                        close(client_fd);
                     }
                 }
             };
