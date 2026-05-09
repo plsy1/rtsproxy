@@ -498,9 +498,16 @@ void RTSPToRtspClient::init_timer_fd()
     its.it_value.tv_sec = interval.count();
     its.it_interval.tv_sec = interval.count();
     timerfd_settime(timer_fd_, 0, &its, nullptr);
+
+    if (timer_ctx_)
+    {
+        loop_->defer_delete(std::move(timer_ctx_));
+    }
+
     timer_ctx_ = std::make_unique<SocketCtx>(
         timer_fd_,
         [this](uint32_t ev) { handle_timer(ev); });
+
     loop_->set(timer_ctx_.get(), timer_fd_, EPOLLIN);
 }
 

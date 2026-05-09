@@ -27,7 +27,8 @@ RTSPToHttpClient::RTSPToHttpClient(EpollLoop *loop, BufferPool &pool, const sock
       ctx(ctx),
       rtp_pipeline_(std::make_unique<RtpPipeline>()),
       client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
-                                              { handle_client(event); }))
+                                              { handle_client(event); })),
+      timer_fd_(-1, loop_)
 {
     loop_->remove(client_fd);
 
@@ -603,6 +604,7 @@ void RTSPToHttpClient::init_timer_fd()
 {
     using namespace std::chrono;
 
+    // Use FdGuard to ensure old FD is removed from epoll and closed
     timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     itimerspec its{};
     auto interval = seconds(20);
@@ -612,12 +614,18 @@ void RTSPToHttpClient::init_timer_fd()
 
     timerfd_settime(timer_fd_, 0, &its, nullptr);
 
-    timer_ctx = std::make_unique<SocketCtx>(
+    // Defer deletion of old context if it exists
+    if (timer_ctx_)
+    {
+        loop_->defer_delete(std::move(timer_ctx_));
+    }
+
+    timer_ctx_ = std::make_unique<SocketCtx>(
         timer_fd_,
         [this](uint32_t event)
         { handle_timer(event); });
 
-    loop_->set(timer_ctx.get(), timer_fd_, EPOLLIN);
+    loop_->set(timer_ctx_.get(), timer_fd_, EPOLLIN);
 }
 
 void RTSPToHttpClient::send_http_response()

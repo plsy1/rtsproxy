@@ -122,12 +122,12 @@ private:
     std::unique_ptr<SocketCtx> rtsp_ctx_;
     std::unique_ptr<SocketCtx> rtp_ctx_;
     std::unique_ptr<SocketCtx> rtcp_ctx_;
-    std::unique_ptr<SocketCtx> timer_ctx;
+    std::unique_ptr<SocketCtx> timer_ctx_;
 
     FdGuard rtsp_fd_;
     FdGuard rtp_fd_;
     FdGuard rtcp_fd_;
-    int timer_fd_{-1};
+    FdGuard timer_fd_;
 
     RtspState state_{RtspState::INIT};
     int cseq_{1};

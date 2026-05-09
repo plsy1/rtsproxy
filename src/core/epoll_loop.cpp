@@ -53,10 +53,15 @@ void EpollLoop::remove(int fd)
 {
     if (epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr) < 0 && errno != ENOENT)
     {
-        Logger::error("epoll_ctl EPOLL_CTL_DEL failed: " + std::string(strerror(errno)));
+        Logger::error("epoll_ctl DEL failed for fd " + std::to_string(fd) + ": " + strerror(errno));
     }
 
-    ctx_ptr_map.erase(fd);
+    auto it = ctx_ptr_map.find(fd);
+    if (it != ctx_ptr_map.end())
+    {
+        deferred_delete_ctx_.push_back(std::move(it->second));
+        ctx_ptr_map.erase(it);
+    }
 }
 
 void EpollLoop::set(SocketCtx *ctx, int fd, uint32_t events)
@@ -88,6 +93,11 @@ void EpollLoop::set(std::unique_ptr<SocketCtx> ctx, int fd, uint32_t events)
     ev.events = events;
     ev.data.ptr = ctx.get();
 
+    auto it = ctx_ptr_map.find(fd);
+    if (it != ctx_ptr_map.end())
+    {
+        deferred_delete_ctx_.push_back(std::move(it->second));
+    }
     ctx_ptr_map[fd] = std::move(ctx);
 
     if (epoll_ctl(epfd_, EPOLL_CTL_ADD, fd, &ev) == -1)
@@ -96,12 +106,12 @@ void EpollLoop::set(std::unique_ptr<SocketCtx> ctx, int fd, uint32_t events)
         {
             if (epoll_ctl(epfd_, EPOLL_CTL_MOD, fd, &ev) < 0)
             {
-                Logger::error(std::string("epoll_ctl EPOLL_CTL_MOD failed: ") + strerror(errno));
+                Logger::error("epoll_ctl MOD failed for fd " + std::to_string(fd) + ": " + strerror(errno));
             }
         }
         else
         {
-            Logger::error(std::string("epoll_ctl EPOLL_CTL_ADD failed: ") + strerror(errno));
+            Logger::error("epoll_ctl ADD failed for fd " + std::to_string(fd) + ": " + strerror(errno));
         }
     }
 }
@@ -125,7 +135,19 @@ void EpollLoop::loop(int timeout_ms)
                 continue;
             ctx->handler(events_[i].events);
         }
+
         process_tasks();
+
+        // Clear deferred contexts after processing all events and tasks
+        deferred_delete_ctx_.clear();
+    }
+}
+
+void EpollLoop::defer_delete(std::unique_ptr<SocketCtx> ctx)
+{
+    if (ctx)
+    {
+        deferred_delete_ctx_.push_back(std::move(ctx));
     }
 }
 

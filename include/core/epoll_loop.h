@@ -23,6 +23,12 @@ public:
     void remove(int fd);
     void loop(int timeout_ms = -1);
 
+    /**
+     * Defer deletion of a SocketCtx until the end of the current event loop cycle.
+     * This prevents bad_function_call crashes if the context is being processed.
+     */
+    void defer_delete(std::unique_ptr<SocketCtx> ctx);
+
     static void set_non_blocking(int fd);
 
     IClient *get_client_from_map(int client_fd);
@@ -39,6 +45,7 @@ private:
     std::vector<struct epoll_event> events_;
     std::unordered_map<int, std::unique_ptr<SocketCtx>> ctx_ptr_map;
     std::unordered_map<int, std::unique_ptr<IClient>> client_ptr_map;
+    std::vector<std::unique_ptr<SocketCtx>> deferred_delete_ctx_;
 
     // Queue to hold tasks
     std::queue<std::function<void()>> task_queue_;
