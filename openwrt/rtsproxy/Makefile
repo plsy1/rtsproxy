@@ -13,7 +13,7 @@ define Package/rtsproxy
   SECTION:=net
   CATEGORY:=Network
   TITLE:=High Performance RTSP Proxy
-  DEPENDS:=+libstdcpp +libpthread
+  DEPENDS:=+libstdcpp +libpthread +libatomic
 endef
 
 define Build/Prepare
