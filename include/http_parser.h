@@ -7,10 +7,10 @@ class httpParser
 {
 public:
     static bool parse_http_url(const std::string &url, std::string &rtsp_url);
-    static bool load_json(const std::string jsonPath);
+    static void setTemplates(const nlohmann::json &templates);
 
 private:
-    static nlohmann::json parseConfig;
+    static nlohmann::json replaceTemplates;
 
     static std::vector<std::string> split(const std::string &str, char delimiter);
     static std::string join(const std::vector<std::string> &parts, const std::string &delimiter);

@@ -1,4 +1,6 @@
 #include "../include/server_config.h"
+#include "../include/http_parser.h"
+#include "../include/3rd/json.hpp"
 #include "../include/logger.h"
 #include <iostream>
 #include <signal.h>
@@ -34,11 +36,6 @@ void ServerConfig::setPort(int p)
 void ServerConfig::setNatEnabled(bool enable)
 {
     enable_nat = enable;
-    if (enable) {
-        Logger::info("[CONFIG] NAT traversal ENABLED (Method: " + nat_method + ")");
-    } else {
-        Logger::info("[CONFIG] NAT traversal DISABLED");
-    }
 }
 
 void ServerConfig::setNatMethod(const std::string &method)
@@ -107,20 +104,10 @@ void ServerConfig::setBlacklist(const std::vector<std::string> &list)
 void ServerConfig::setStripPadding(bool enable)
 {
     strip_padding = enable;
-    if (enable) {
-        Logger::info("[CONFIG] MPEG-TS padding stripping ENABLED (Bandwidth Optimization)");
-    } else {
-        Logger::info("[CONFIG] MPEG-TS padding stripping DISABLED");
-    }
 }
 void ServerConfig::setWaitKeyframe(bool enable)
 {
     wait_keyframe = enable;
-    if (enable) {
-        Logger::info("[CONFIG] Startup keyframe synchronization ENABLED (Anti-Greenscreen)");
-    } else {
-        Logger::info("[CONFIG] Startup keyframe synchronization DISABLED");
-    }
 }
 void ServerConfig::setWatchdogEnabled(bool enable)
 {
@@ -245,6 +232,94 @@ void ServerConfig::printUsage(const std::string &program_name)
     std::cout << "      --stun-host       <host>  Set STUN server host (default: " << stun_server_host << ")" << std::endl;
     std::cout << "      --stun-port       <port>  Set STUN server port (default: " << stun_server_port << ")" << std::endl;
     std::cout << "      --strip-padding           Strip RTP padding and TS null packets" << std::endl;
+    std::cout << "      --wait-keyframe           Wait for keyframe before starting relay (Anti-Greenscreen)" << std::endl;
+}
+
+bool ServerConfig::loadFromFile(const std::string &path)
+{
+    std::ifstream ifs(path);
+    if (!ifs.is_open())
+    {
+        Logger::warn("[SERVER] Failed to open config file: " + path);
+        return false;
+    }
+
+    nlohmann::json config;
+    try {
+        config = nlohmann::json::parse(ifs, nullptr, true, true);
+    } catch (const nlohmann::json::parse_error& e) {
+        Logger::error("[CONFIG] JSON parse error: " + std::string(e.what()));
+        return false;
+    }
+
+    if (config.contains("blacklist") && config["blacklist"].is_array())
+    {
+        std::vector<std::string> bl;
+        for (const auto &item : config["blacklist"])
+        {
+            if (item.is_string()) bl.push_back(item.get<std::string>());
+        }
+        setBlacklist(bl);
+    }
+
+    if (config.contains("settings") && config["settings"].is_object())
+    {
+        const auto& s = config["settings"];
+        if (s.contains("port")) setPort(s["port"].get<int>());
+        if (s.contains("nat_method")) setNatMethod(s["nat_method"].get<std::string>());
+        if (s.contains("enable_nat")) setNatEnabled(s["enable_nat"].get<bool>());
+        if (s.contains("buffer_pool_count")) setBufferPoolCount(s["buffer_pool_count"].get<int>());
+        if (s.contains("buffer_pool_block_size")) setBufferPoolBlockSize(s["buffer_pool_block_size"].get<int>());
+        if (s.contains("auth_token")) setToken(s["auth_token"].get<std::string>());
+        if (s.contains("log_file")) setLogFile(s["log_file"].get<std::string>());
+        if (s.contains("log_lines")) setLogLines(s["log_lines"].get<size_t>());
+        if (s.contains("log_level")) {
+            std::string level = s["log_level"].get<std::string>();
+            if (level == "error") Logger::setLogLevel(LogLevel::ERROR);
+            else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
+            else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
+            else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
+        }
+        if (s.contains("strip_padding")) setStripPadding(s["strip_padding"].get<bool>());
+        if (s.contains("wait_keyframe")) setWaitKeyframe(s["wait_keyframe"].get<bool>());
+        if (s.contains("watchdog")) setWatchdogEnabled(s["watchdog"].get<bool>());
+        if (s.contains("daemon")) setDaemonEnabled(s["daemon"].get<bool>());
+        if (s.contains("http_interface")) setHttpUpstreamInterface(s["http_interface"].get<std::string>());
+        if (s.contains("mitm_interface")) setMitmUpstreamInterface(s["mitm_interface"].get<std::string>());
+        if (s.contains("listen_interface")) setListenInterface(s["listen_interface"].get<std::string>());
+        if (s.contains("stun_host")) setStunHost(s["stun_host"].get<std::string>());
+        if (s.contains("stun_port")) setStunPort(s["stun_port"].get<int>());
+    }
+
+    if (config.contains("replace_templates") && config["replace_templates"].is_array())
+    {
+        httpParser::setTemplates(config["replace_templates"]);
+    }
+
+    return true;
+}
+
+void ServerConfig::printConfig()
+{
+    Logger::info("[CONFIG] Port:              " + std::to_string(port));
+    Logger::info("[CONFIG] Listen Interface:  " + (listen_interface.empty() ? "ANY" : listen_interface));
+    Logger::info("[CONFIG] NAT Enabled:       " + std::string(enable_nat ? "YES" : "NO"));
+    if (enable_nat) {
+        Logger::info("[CONFIG]   NAT Method:      " + nat_method);
+        Logger::info("[CONFIG]   STUN Host:       " + stun_server_host);
+        Logger::info("[CONFIG]   STUN Port:       " + std::to_string(stun_server_port));
+    }
+    Logger::info("[CONFIG] Buffer Pool Count: " + std::to_string(buffer_pool_count));
+    Logger::info("[CONFIG] Buffer Pool Size:  " + std::to_string(buffer_pool_block_size));
+    Logger::info("[CONFIG] Strip Padding:     " + std::string(strip_padding ? "YES" : "NO"));
+    Logger::info("[CONFIG] Wait Keyframe:     " + std::string(wait_keyframe ? "YES" : "NO"));
+    Logger::info("[CONFIG] Watchdog:          " + std::string(watchdog_enabled ? "YES" : "NO"));
+    Logger::info("[CONFIG] Daemon:            " + std::string(daemon_enabled ? "YES" : "NO"));
+    Logger::info(std::string("[CONFIG] Auth Token:        ") + (auth_token.empty() ? "NONE" : "SET (MASKED)"));
+    if (!http_upstream_interface.empty()) 
+        Logger::info("[CONFIG] HTTP Upstream If:  " + http_upstream_interface);
+    if (!mitm_upstream_interface.empty())
+        Logger::info("[CONFIG] MITM Upstream If:  " + mitm_upstream_interface);
 }
 
 void ServerConfig::kill_previous_instance()

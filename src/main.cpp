@@ -5,7 +5,6 @@
 #include "../include/rtsp_handle.h"
 #include "../include/buffer_pool.h"
 #include "../include/common/socket_ctx.h"
-#include "../include/http_parser.h"
 #include "../include/socket_helper.h"
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -86,11 +85,11 @@ int main(int argc, char *argv[])
             ServerConfig::setJsonPath(optarg);
         }
     }
-    // Reset getopt to parse again
-    optind = 1;
+    // Reset getopt to parse again. Set to 0 to force full reset of getopt_long internal state.
+    optind = 0;
 
     // 2. Load settings from config file (if it exists)
-    httpParser::load_json(ServerConfig::getJsonPath());
+    ServerConfig::loadFromFile(ServerConfig::getJsonPath());
 
     // 3. Parse all arguments (command line overrides config file)
     int opt;
@@ -170,12 +169,10 @@ int main(int argc, char *argv[])
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "strip-padding") == 0)
             {
                 ServerConfig::setStripPadding(true);
-                Logger::info("[CONFIG] Padding stripping enabled");
             }
             else if (longindex >= 0 && strcmp(long_options[longindex].name, "wait-keyframe") == 0)
             {
                 ServerConfig::setWaitKeyframe(true);
-                Logger::info("[CONFIG] Wait for keyframe enabled");
             }
             break;
         default:
@@ -183,6 +180,8 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+
+    ServerConfig::printConfig();
 
     if (!ServerConfig::getLogFile().empty()) {
         Logger::setLogFile(ServerConfig::getLogFile(), ServerConfig::getLogLines());

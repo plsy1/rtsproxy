@@ -217,6 +217,7 @@ int rtspParser::parse_session_id(const std::string &resp, rtspCtx &ctx)
 
 int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
 {
+    ctx.rtsp_url = url;
     if (url.rfind("rtsp://", 0) != 0)
         return -1;
 

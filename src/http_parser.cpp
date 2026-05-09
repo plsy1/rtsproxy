@@ -1,15 +1,12 @@
 #include "../include/http_parser.h"
-#include "../include/server_config.h"
-#include "../include/3rd/json.hpp"
 #include "../include/logger.h"
-#include <fstream>
 #include <regex>
 #include <vector>
 #include <ctime>
 
 using json = nlohmann::json;
 
-nlohmann::json httpParser::parseConfig;
+nlohmann::json httpParser::replaceTemplates;
 
 std::string httpParser::simplifyToRegex(const std::string &match_pattern)
 {
@@ -139,70 +136,9 @@ std::string httpParser::join(const std::vector<std::string> &parts, const std::s
     return result;
 }
 
-bool httpParser::load_json(const std::string jsonPath)
+void httpParser::setTemplates(const nlohmann::json &templates)
 {
-
-    std::ifstream ifs(jsonPath);
-    if (!ifs.is_open())
-    {
-        Logger::warn("[SERVER] Failed to open rewrite file.");
-        return false;
-    }
-
-    try {
-        parseConfig = json::parse(ifs, nullptr, true, true);
-    } catch (const json::parse_error& e) {
-        Logger::error("[CONFIG] JSON parse error: " + std::string(e.what()));
-        return false;
-    }
-
-    if (parseConfig.contains("blacklist") && parseConfig["blacklist"].is_array())
-    {
-        std::vector<std::string> blacklist;
-        for (const auto &item : parseConfig["blacklist"])
-        {
-            if (item.is_string())
-            {
-                blacklist.push_back(item.get<std::string>());
-            }
-        }
-        ServerConfig::setBlacklist(blacklist);
-        Logger::info("[CONFIG] Loaded " + std::to_string(blacklist.size()) + " items into blacklist");
-    }
-
-    // Load global settings
-    if (parseConfig.contains("settings") && parseConfig["settings"].is_object())
-    {
-        const auto& s = parseConfig["settings"];
-        if (s.contains("port")) ServerConfig::setPort(s["port"].get<int>());
-        if (s.contains("nat_method")) ServerConfig::setNatMethod(s["nat_method"].get<std::string>());
-        if (s.contains("enable_nat")) ServerConfig::setNatEnabled(s["enable_nat"].get<bool>());
-        if (s.contains("buffer_pool_count")) ServerConfig::setBufferPoolCount(s["buffer_pool_count"].get<int>());
-        if (s.contains("buffer_pool_block_size")) ServerConfig::setBufferPoolBlockSize(s["buffer_pool_block_size"].get<int>());
-        if (s.contains("auth_token")) ServerConfig::setToken(s["auth_token"].get<std::string>());
-        if (s.contains("log_file")) ServerConfig::setLogFile(s["log_file"].get<std::string>());
-        if (s.contains("log_lines")) ServerConfig::setLogLines(s["log_lines"].get<size_t>());
-        if (s.contains("log_level")) {
-            std::string level = s["log_level"].get<std::string>();
-            if (level == "error") Logger::setLogLevel(LogLevel::ERROR);
-            else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
-            else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
-            else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
-        }
-        if (s.contains("strip_padding")) ServerConfig::setStripPadding(s["strip_padding"].get<bool>());
-        if (s.contains("wait_keyframe")) ServerConfig::setWaitKeyframe(s["wait_keyframe"].get<bool>());
-        if (s.contains("watchdog")) ServerConfig::setWatchdogEnabled(s["watchdog"].get<bool>());
-        if (s.contains("daemon")) ServerConfig::setDaemonEnabled(s["daemon"].get<bool>());
-        if (s.contains("http_interface")) ServerConfig::setHttpUpstreamInterface(s["http_interface"].get<std::string>());
-        if (s.contains("mitm_interface")) ServerConfig::setMitmUpstreamInterface(s["mitm_interface"].get<std::string>());
-        if (s.contains("listen_interface")) ServerConfig::setListenInterface(s["listen_interface"].get<std::string>());
-        if (s.contains("stun_host")) ServerConfig::setStunHost(s["stun_host"].get<std::string>());
-        if (s.contains("stun_port")) ServerConfig::setStunPort(s["stun_port"].get<int>());
-        
-        Logger::info("[CONFIG] Global settings loaded from config file");
-    }
-
-    return true;
+    replaceTemplates = templates;
 }
 
 bool httpParser::parse_rtp_url(const std::string &url, std::string &rtsp_url)
@@ -229,7 +165,7 @@ bool httpParser::parse_tv_url(const std::string &url, std::string &rtsp_url)
     { // for playback link
 
         std::string replaced_url = url;
-        for (const auto &template_obj : parseConfig["replace_templates"])
+        for (const auto &template_obj : replaceTemplates)
         {
             std::string action = template_obj["action"];
             std::string match_pattern = template_obj["match"];

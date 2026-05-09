@@ -50,7 +50,8 @@ public:
     static bool isDaemonEnabled();
     static const std::vector<std::string>& getBlacklist();
     static void printUsage(const std::string &program_name);
-
+    static void printConfig();
+    static bool loadFromFile(const std::string &path);
     static void kill_previous_instance();
 
 private:
