@@ -62,6 +62,11 @@ RTSPMitmClient::RTSPMitmClient(EpollLoop *loop, BufferPool &pool,
           client_fd,
           [this](uint32_t ev) { handle_downstream(ev); })),
       client_addr_(client_addr),
+      rtp_us_fd_(-1, loop),
+      rtcp_us_fd_(-1, loop),
+      rtp_ds_fd_(-1, loop),
+      rtcp_ds_fd_(-1, loop),
+      timer_fd_(-1, loop),
       rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
     // Remove the simple EPOLLIN watch that was set by the accept handler;
@@ -682,8 +687,8 @@ void RTSPMitmClient::handle_rtp_from_upstream(uint32_t /*events*/)
         }
 
         // Packet from upstream server -> send to downstream client
-        if (src.sin_port == server_rtp_addr_.sin_port &&
-            src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
+        // if (src.sin_port == server_rtp_addr_.sin_port &&
+        //     src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
             upstream_est_.addBytes(n);
             Statistics::getInstance().addUpstreamBytes(n);
@@ -728,8 +733,8 @@ void RTSPMitmClient::handle_rtcp_from_upstream(uint32_t /*events*/)
         }
 
         // Packet from upstream server -> send to downstream client
-        if (src.sin_port == server_rtcp_addr_.sin_port &&
-            src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
+        // if (src.sin_port == server_rtcp_addr_.sin_port &&
+        //     src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
             upstream_est_.addBytes(n);
             Statistics::getInstance().addUpstreamBytes(n);
@@ -761,7 +766,7 @@ void RTSPMitmClient::send_interleaved_downstream(uint8_t channel, const uint8_t 
     memcpy(buf.get() + 4, data, len);
 
     // Prevent memory exhaustion by limiting queue size (Drop oldest if full)
-    if (to_downstream_q_.size() > 512)
+    if (to_downstream_q_.size() > 2048)
     {
         auto &old_packet = to_downstream_q_.front();
         if (old_packet.data) pool_.release(std::move(old_packet.data));

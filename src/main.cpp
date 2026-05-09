@@ -280,6 +280,7 @@ int main(int argc, char *argv[])
                 break;
             }
             fcntl(client_fd, F_SETFL, O_NONBLOCK);
+            set_tcp_nodelay(client_fd);
 
             auto ctx = std::make_unique<SocketCtx>();
             ctx->fd = client_fd;

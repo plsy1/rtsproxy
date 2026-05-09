@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <sys/timerfd.h>
@@ -12,6 +13,12 @@ static void optimize_udp_buffer(int fd)
     int buf_size = 2 * 1024 * 1024;
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+}
+
+void set_tcp_nodelay(int fd)
+{
+    int opt = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 }
 
 int create_listen_socket(int port, const std::string &iface)
@@ -70,6 +77,7 @@ int create_nonblocking_tcp(const std::string &ip, uint16_t port, const std::stri
     if (connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS)
         return -1;
 
+    set_tcp_nodelay(sockfd);
     return sockfd;
 }
 

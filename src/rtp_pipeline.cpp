@@ -95,9 +95,34 @@ bool RtpPipeline::check_keyframe(const uint8_t *buf, size_t len) {
         for (size_t i = 0; payload_off + i + 188 <= len; i += 188) {
             const uint8_t *ts = buf + payload_off + i;
             uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
-            if (pid == 0) return true; // PAT found
+            
+            // 1. PAT is a good sync point as headers usually follow
+            if (pid == 0) return true; 
+
+            // 2. Check for Random Access Indicator in Adaptation Field
             uint8_t afc = (ts[3] & 0x30) >> 4;
-            if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) return true; // Keyframe found
+            if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) return true;
+
+            // 3. Deep scan for H.264 NAL units (SPS=7, PPS=8, IDR=5)
+            // This handles cases where RAI bit is not set but headers are present.
+            size_t ts_payload_off = 4;
+            if (afc == 2 || afc == 3) ts_payload_off += 1 + ts[4];
+            if (ts_payload_off < 188) {
+                const uint8_t *data = ts + ts_payload_off;
+                size_t data_len = 188 - ts_payload_off;
+                for (size_t j = 0; j + 4 < data_len; ++j) {
+                    if (data[j] == 0x00 && data[j+1] == 0x00 && data[j+2] == 0x01) {
+                        // H.264 NAL type is in bits 0-4 of the first byte
+                        uint8_t nal_type_h264 = data[j+3] & 0x1F;
+                        if (nal_type_h264 == 7 || nal_type_h264 == 8 || nal_type_h264 == 5) return true;
+
+                        // H.265 NAL type is in bits 1-6 of the first byte
+                        uint8_t nal_type_h265 = (data[j+3] >> 1) & 0x3F;
+                        if (nal_type_h265 >= 32 && nal_type_h265 <= 34) return true; // VPS, SPS, PPS
+                        if (nal_type_h265 == 19 || nal_type_h265 == 20) return true; // IDR
+                    }
+                }
+            }
         }
     }
     return false;
