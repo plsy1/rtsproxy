@@ -119,8 +119,16 @@ jobs:
           meson compile -C builddir -j$(nproc)
 
   openwrt-ipk-check:
-    name: OpenWrt IPK Check (x64)
+    name: OpenWrt IPK Check (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: mipsel_24kc
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621/openwrt-sdk-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,13 +143,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: sdk
-          key: sdk-23.05-x64-${{ hashFiles('openwrt/rtsproxy/Makefile') }}
+          key: sdk-23.05-${{ matrix.arch }}-${{ hashFiles('openwrt/rtsproxy/Makefile') }}
 
       - name: Download SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           mkdir -p sdk
-          wget https://downloads.openwrt.org/releases/23.05.0/targets/x86/64/openwrt-sdk-23.05.0-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz -O sdk.tar.xz
+          wget ${{ matrix.sdk_url }} -O sdk.tar.xz
           tar xf sdk.tar.xz -C sdk --strip-components=1
 
       - name: Build IPK
