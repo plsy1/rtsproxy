@@ -61,7 +61,7 @@ jobs:
             PKG_REL="${VERSION_FULL##*-r}"
           elif [[ "$VERSION_FULL" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             PKG_VER="$VERSION_FULL"
-            PKG_REL="1"
+            PKG_REL=""
           else
             # Clean version string to make it valid for apk/opkg
             CLEANED=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
@@ -70,7 +70,7 @@ jobs:
             else
               PKG_VER="$CLEANED"
             fi
-            PKG_REL="1"
+            PKG_REL=""
           fi
           
           # Update package version and release in Makefiles
