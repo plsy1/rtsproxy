@@ -55,19 +55,29 @@ jobs:
           fi
           VERSION_FULL="${TAG_NAME#v}"
           
-          # Clean version string to make it valid for apk/opkg
-          if [[ "$VERSION_FULL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-r[0-9]+)?$ ]]; then
-            VERSION_CLEAN="$VERSION_FULL"
+          # Extract version and release
+          if [[ "$VERSION_FULL" =~ ^[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]; then
+            PKG_VER="${VERSION_FULL%-r*}"
+            PKG_REL="${VERSION_FULL##*-r}"
+          elif [[ "$VERSION_FULL" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            PKG_VER="$VERSION_FULL"
+            PKG_REL="1"
           else
-            VERSION_CLEAN=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
-            if [ -z "$VERSION_CLEAN" ] || [[ ! "$VERSION_CLEAN" =~ ^[0-9] ]]; then
-              VERSION_CLEAN="1.0.0"
+            # Clean version string to make it valid for apk/opkg
+            CLEANED=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
+            if [ -z "$CLEANED" ] || [[ ! "$CLEANED" =~ ^[0-9] ]]; then
+              PKG_VER="1.0.0"
+            else
+              PKG_VER="$CLEANED"
             fi
+            PKG_REL="1"
           fi
           
-          # Update package version in Makefiles
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_CLEAN/" openwrt/rtsproxy/Makefile
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_CLEAN/" openwrt/luci-app-rtsproxy/Makefile
+          # Update package version and release in Makefiles
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/luci-app-rtsproxy/Makefile
           
           # Copy source files to the rtsproxy package folder
           cp -r src openwrt/rtsproxy/

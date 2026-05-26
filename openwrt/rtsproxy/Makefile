@@ -2,6 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=rtsproxy
 PKG_VERSION:=1.0.0
+PKG_RELEASE:=1
 
 PKG_MAINTAINER:=plsy1
 PKG_LICENSE:=GPL-3.0-only
