@@ -55,9 +55,15 @@ jobs:
           fi
           VERSION_FULL="${TAG_NAME#v}"
           
+          # Clean version string to make it valid for apk/opkg
+          VERSION_CLEAN=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
+          if [ -z "$VERSION_CLEAN" ] || [[ ! "$VERSION_CLEAN" =~ ^[0-9] ]]; then
+            VERSION_CLEAN="1.0.0"
+          fi
+          
           # Update package version in Makefiles
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" openwrt/rtsproxy/Makefile
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_FULL/" openwrt/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_CLEAN/" openwrt/rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$VERSION_CLEAN/" openwrt/luci-app-rtsproxy/Makefile
           
           # Copy source files to the rtsproxy package folder
           cp -r src openwrt/rtsproxy/
