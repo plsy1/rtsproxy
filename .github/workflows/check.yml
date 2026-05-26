@@ -158,6 +158,8 @@ jobs:
           # Update package version and release in Makefiles
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/rtsproxy/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/rtsproxy/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/luci-app-rtsproxy/Makefile
           
           # Copy source files to the rtsproxy package folder
           cp -r src openwrt/rtsproxy/
@@ -183,5 +185,36 @@ jobs:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEED_DIR: ${{ github.workspace }}/openwrt
           NO_SHFMT_CHECK: true
-          PACKAGES: rtsproxy
+          PACKAGES: rtsproxy luci-app-rtsproxy
           V: sc
+
+      - name: Collect artifacts
+        run: |
+          VERSION_FULL="1.0.0-test"
+          mkdir -p output
+          
+          # Collect IPK packages
+          find bin/packages/ -name "*rtsproxy*.ipk" ! -name "*-dbgsym*" | while read -r file; do
+            if [[ "$file" == *"luci-app-rtsproxy"* ]]; then
+              cp "$file" "output/luci-app-rtsproxy_${VERSION_FULL}_all.ipk"
+            else
+              cp "$file" "output/rtsproxy_${VERSION_FULL}_openwrt-${{ matrix.sdk }}-${{ matrix.arch }}.ipk"
+            fi
+          done
+
+          # Collect APK packages
+          find bin/packages/ -name "*rtsproxy*.apk" ! -name "*-dbgsym*" | while read -r file; do
+            if [[ "$file" == *"luci-app-rtsproxy"* ]]; then
+              cp "$file" "output/luci-app-rtsproxy_${VERSION_FULL}_all.apk"
+            else
+              cp "$file" "output/rtsproxy_${VERSION_FULL}_openwrt-${{ matrix.sdk }}-${{ matrix.arch }}.apk"
+            fi
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtsproxy-test-package-${{ matrix.sdk }}-${{ matrix.arch }}
+          path: |
+            output/*.ipk
+            output/*.apk
