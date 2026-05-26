@@ -138,9 +138,13 @@ jobs:
           VERSION_FULL="1.0.0-test"
           
           # Clean version string to make it valid for apk/opkg
-          VERSION_CLEAN=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
-          if [ -z "$VERSION_CLEAN" ] || [[ ! "$VERSION_CLEAN" =~ ^[0-9] ]]; then
-            VERSION_CLEAN="1.0.0"
+          if [[ "$VERSION_FULL" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-r[0-9]+)?$ ]]; then
+            VERSION_CLEAN="$VERSION_FULL"
+          else
+            VERSION_CLEAN=$(echo "$VERSION_FULL" | sed 's/[^0-9.]/./g' | sed -E 's/\.+/./g' | sed 's/^\.//' | sed 's/\.$//')
+            if [ -z "$VERSION_CLEAN" ] || [[ ! "$VERSION_CLEAN" =~ ^[0-9] ]]; then
+              VERSION_CLEAN="1.0.0"
+            fi
           fi
           
           # Update package version in Makefiles
