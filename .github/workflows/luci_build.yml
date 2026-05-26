@@ -1,4 +1,4 @@
-name: Build OpenWrt Packages
+name: Build LuCI Package
 
 on:
   release:
@@ -11,35 +11,16 @@ env:
 
 jobs:
   build:
-    name: OpenWRT ${{ matrix.sdk }}-${{ matrix.arch }}
+    name: OpenWRT LuCI Build ${{ matrix.sdk }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - x86_64
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_cortex-a76
-          - aarch64_generic
-          - arm_cortex-a5_vfpv4
-          - arm_cortex-a7
-          - arm_cortex-a7_neon-vfpv4
-          - arm_cortex-a7_vfpv4
-          - arm_cortex-a9
-          - arm_cortex-a9_neon
-          - arm_cortex-a9_vfpv3-d16
-          - arm_cortex-a15_neon-vfpv4
-          - mips_24kc
-          - mips_mips32
-          - mipsel_24kc
-          - mipsel_24kc_24kf
-          - mipsel_74kc
-          - mipsel_mips32
-
         sdk:
           - "24.10.4" # For IPK
           - "25.12.0" # For APK
+        arch:
+          - x86_64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -74,15 +55,8 @@ jobs:
           fi
           
           # Update package version and release in Makefiles
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/rtsproxy/Makefile
-          
-          # Copy source files to the rtsproxy package folder
-          cp -r src openwrt/rtsproxy/
-          cp -r include openwrt/rtsproxy/
-          cp -r webui openwrt/rtsproxy/
-          cp meson.build openwrt/rtsproxy/
-          cp meson_options.txt openwrt/rtsproxy/
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/luci-app-rtsproxy/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/luci-app-rtsproxy/Makefile
           
           # Fix CRLF line endings
           find openwrt -type f -exec sed -i 's/\r$//' {} +
@@ -93,7 +67,7 @@ jobs:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEED_DIR: ${{ github.workspace }}/openwrt
           NO_SHFMT_CHECK: true
-          PACKAGES: rtsproxy
+          PACKAGES: luci-app-rtsproxy
           V: sc
 
       - name: Collect artifacts
@@ -107,25 +81,25 @@ jobs:
           mkdir -p output
           
           # Collect IPK packages
-          find bin/packages/ -name "rtsproxy*.ipk" ! -name "*-dbgsym*" | while read -r file; do
-            cp "$file" "output/rtsproxy_${VERSION_FULL}_openwrt-${{ matrix.sdk }}-${{ matrix.arch }}.ipk"
+          find bin/packages/ -name "*luci-app-rtsproxy*.ipk" ! -name "*-dbgsym*" | while read -r file; do
+            cp "$file" "output/luci-app-rtsproxy_${VERSION_FULL}_all.ipk"
           done
 
           # Collect APK packages
-          find bin/packages/ -name "rtsproxy*.apk" ! -name "*-dbgsym*" | while read -r file; do
-            cp "$file" "output/rtsproxy_${VERSION_FULL}_openwrt-${{ matrix.sdk }}-${{ matrix.arch }}.apk"
+          find bin/packages/ -name "*luci-app-rtsproxy*.apk" ! -name "*-dbgsym*" | while read -r file; do
+            cp "$file" "output/luci-app-rtsproxy_${VERSION_FULL}_all.apk"
           done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rtsproxy-package-${{ matrix.sdk }}-${{ matrix.arch }}
+          name: luci-app-package-${{ matrix.sdk }}
           path: |
             output/*.ipk
             output/*.apk
 
   release:
-    name: Release IPKs and APKs
+    name: Release LuCI Packages
     runs-on: ubuntu-latest
     needs: build
     permissions:
@@ -137,7 +111,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release_packages
-          pattern: "rtsproxy-package-*"
+          pattern: "luci-app-package-*"
           merge-multiple: true
       - name: Upload release assets
         env:

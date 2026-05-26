@@ -158,8 +158,6 @@ jobs:
           # Update package version and release in Makefiles
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/rtsproxy/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/rtsproxy/Makefile
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/luci-app-rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/luci-app-rtsproxy/Makefile
           
           # Copy source files to the rtsproxy package folder
           cp -r src openwrt/rtsproxy/
@@ -177,5 +175,5 @@ jobs:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEED_DIR: ${{ github.workspace }}/openwrt
           NO_SHFMT_CHECK: true
-          PACKAGES: ${{ matrix.arch == 'x86_64' && 'luci-app-rtsproxy rtsproxy' || 'rtsproxy' }}
+          PACKAGES: rtsproxy
           V: sc
