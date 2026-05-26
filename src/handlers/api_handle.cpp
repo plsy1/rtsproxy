@@ -135,7 +135,16 @@ void ApiHandle::serve_admin_file(int client_fd, const RequestInfo &info)
 
 void ApiHandle::send_json_response(int client_fd, const json &j)
 {
-    std::string body = j.dump();
+    std::string body;
+    try
+    {
+        body = j.dump(-1, ' ', false, json::error_handler_t::replace);
+    }
+    catch (const std::exception &e)
+    {
+        Logger::error("[SERVER] Failed to dump JSON: " + std::string(e.what()));
+        body = "{\"error\":\"Internal Server Error: JSON serialization failed\"}";
+    }
     std::string header = "HTTP/1.1 200 OK\r\n"
                          "Content-Type: application/json\r\n"
                          "Content-Length: " + std::to_string(body.size()) + "\r\n"

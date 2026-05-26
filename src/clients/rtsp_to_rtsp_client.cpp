@@ -1246,6 +1246,21 @@ RTSPToRtspClient::FdGuard &RTSPToRtspClient::FdGuard::operator=(FdGuard &&other)
     return *this;
 }
 
+RTSPToRtspClient::FdGuard &RTSPToRtspClient::FdGuard::operator=(int fd) noexcept
+{
+    if (fd_ != fd)
+    {
+        if (fd_ >= 0)
+        {
+            if (loop_)
+                loop_->remove(fd_);
+            close(fd_);
+        }
+        fd_ = fd;
+    }
+    return *this;
+}
+
 int &RTSPToRtspClient::FdGuard::get_ref() { return fd_; }
 int RTSPToRtspClient::FdGuard::get() const { return fd_; }
 RTSPToRtspClient::FdGuard::operator int() const { return fd_; }
@@ -1320,11 +1335,12 @@ json RTSPToRtspClient::get_info() const
     info["type"] = "mitm";
     info["transport"] = is_downstream_tcp_ ? "TCP" : "UDP";
     
-    char addr[INET_ADDRSTRLEN];
+    char addr[INET_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET, &client_addr_.sin_addr, addr, INET_ADDRSTRLEN);
     info["downstream"] = std::string(addr) + ":" + std::to_string(ntohs(client_addr_.sin_port));
     
     if (server_rtp_addr_.sin_port != 0) {
+        memset(addr, 0, INET_ADDRSTRLEN);
         inet_ntop(AF_INET, &server_rtp_addr_.sin_addr, addr, INET_ADDRSTRLEN);
         info["upstream"] = std::string(addr) + ":" + std::to_string(ntohs(server_rtp_addr_.sin_port));
     } else {

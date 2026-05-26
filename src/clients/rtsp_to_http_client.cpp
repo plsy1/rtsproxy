@@ -829,6 +829,21 @@ RTSPToHttpClient::FdGuard &RTSPToHttpClient::FdGuard::operator=(FdGuard &&other)
     return *this;
 }
 
+RTSPToHttpClient::FdGuard &RTSPToHttpClient::FdGuard::operator=(int fd) noexcept
+{
+    if (fd_ != fd)
+    {
+        if (fd_ >= 0)
+        {
+            if (loop_)
+                loop_->remove(fd_);
+            close(fd_);
+        }
+        fd_ = fd;
+    }
+    return *this;
+}
+
 int &RTSPToHttpClient::FdGuard::get_ref() { return fd_; }
 int RTSPToHttpClient::FdGuard::get() const { return fd_; }
 RTSPToHttpClient::FdGuard::operator int() const { return fd_; }
@@ -838,7 +853,7 @@ json RTSPToHttpClient::get_info() const
     info["type"] = "http-proxy";
     info["transport"] = is_tcp_mode_ ? "TCP" : "UDP";
     
-    char addr[INET_ADDRSTRLEN];
+    char addr[INET_ADDRSTRLEN] = {0};
     inet_ntop(AF_INET, &client_addr_.sin_addr, addr, INET_ADDRSTRLEN);
     info["downstream"] = std::string(addr) + ":" + std::to_string(ntohs(client_addr_.sin_port));
     

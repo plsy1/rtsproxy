@@ -59,12 +59,13 @@ private:
     {
     public:
         FdGuard();
-        FdGuard(int fd, EpollLoop *loop = nullptr);
+        explicit FdGuard(int fd, EpollLoop *loop = nullptr);
         ~FdGuard();
         FdGuard(const FdGuard &) = delete;
         FdGuard &operator=(const FdGuard &) = delete;
         FdGuard(FdGuard &&other) noexcept;
         FdGuard &operator=(FdGuard &&other) noexcept;
+        FdGuard &operator=(int fd) noexcept;
         int &get_ref();
         int get() const;
         operator int() const;
