@@ -64,6 +64,14 @@ jobs:
           # Fix CRLF line endings
           find openwrt -type f -exec sed -i 's/\r$//' {} +
 
+      - name: Cache OpenWrt dl directory
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: openwrt-dl-${{ matrix.sdk }}-${{ hashFiles('**/Makefile') }}
+          restore-keys: |
+            openwrt-dl-${{ matrix.sdk }}-
+
       - name: Build
         uses: openwrt/gh-action-sdk@v9
         env:
