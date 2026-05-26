@@ -63,58 +63,63 @@ if [ -z "$BIN_ARCH" ]; then
     esac
 fi
 
-# 4. 准备下载
-LUCI_IPK="luci-app-rtsproxy_${VERSION}_all.ipk"
-CORE_IPK=""
-IPK_ARCH_TAG=""
-
-# 5. 检查是否有匹配系统的核心 IPK
-if [ "$OWRT_MAJOR" = "23.05" ] || [ "$OWRT_MAJOR" = "24.10" ]; then
-    case "$OWRT_ARCH" in
-        x86_64) IPK_ARCH_TAG="x64" ;;
-        aarch64_*) IPK_ARCH_TAG="aarch64" ;;
-        mips_24kc) IPK_ARCH_TAG="mips_24kc" ;;
-        mipsel_24kc) IPK_ARCH_TAG="mipsel_24kc" ;;
-    esac
-    if [ -n "$IPK_ARCH_TAG" ]; then
-        CORE_IPK="rtsproxy_${VERSION}_openwrt-${OWRT_MAJOR}-${IPK_ARCH_TAG}.ipk"
-    fi
+# 4. 检查包管理器和设置参数
+if command -v apk >/dev/null 2>&1; then
+    PKG_CMD="apk"
+    SUFFIX="apk"
+    SDK_VER="25.12.0"
+else
+    PKG_CMD="opkg"
+    SUFFIX="ipk"
+    SDK_VER="24.10.4"
 fi
 
+LUCI_PKG="luci-app-rtsproxy_${VERSION}_all.${SUFFIX}"
+CORE_PKG="rtsproxy_${VERSION}_openwrt-${SDK_VER}-${OWRT_ARCH}.${SUFFIX}"
+
 echo "[*] 正在从 GitHub 下载安装包..."
-if ! wget -qO "/tmp/$LUCI_IPK" "$GITHUB_DOWNLOAD/$TAG/$LUCI_IPK"; then
-    echo "[!] 错误: 无法下载 LuCI 安装包 ($LUCI_IPK)"
+if ! wget -qO "/tmp/$LUCI_PKG" "$GITHUB_DOWNLOAD/$TAG/$LUCI_PKG"; then
+    echo "[!] 错误: 无法下载 LuCI 安装包 ($LUCI_PKG)"
     echo "    请确认 GitHub Release ($TAG) 中是否已包含该文件。"
     exit 1
 fi
 
 INSTALLED_CORE=0
-if [ -n "$CORE_IPK" ]; then
-    echo "[*] 发现匹配系统的核心 IPK: $CORE_IPK"
-    echo "[*] 正在下载核心程序..."
-    if wget -qO "/tmp/$CORE_IPK" "$GITHUB_DOWNLOAD/$TAG/$CORE_IPK"; then
-        echo "[*] 正在同时安装核心程序和 LuCI 界面..."
-        # 同时安装两个包可以自动解决依赖关系
-        if opkg install "/tmp/$CORE_IPK" "/tmp/$LUCI_IPK" --force-reinstall; then
+# 尝试安装对应架构的预编译包
+echo "[*] 正在下载核心程序: $CORE_PKG"
+if wget -qO "/tmp/$CORE_PKG" "$GITHUB_DOWNLOAD/$TAG/$CORE_PKG"; then
+    echo "[*] 正在安装核心程序和 LuCI 界面..."
+    if [ "$PKG_CMD" = "apk" ]; then
+        if apk add --allow-untrusted "/tmp/$CORE_PKG" "/tmp/$LUCI_PKG"; then
+            INSTALLED_CORE=1
+        else
+            echo "[!] APK 安装失败，准备尝试静态二进制回退方案..."
+        fi
+    else
+        if opkg install "/tmp/$CORE_PKG" "/tmp/$LUCI_PKG" --force-reinstall; then
             INSTALLED_CORE=1
         else
             echo "[!] IPK 安装失败，准备尝试静态二进制回退方案..."
         fi
-        rm -f "/tmp/$CORE_IPK"
-    else
-        echo "[!] 警告: 无法下载核心 IPK，将尝试静态二进制方案。"
     fi
+    rm -f "/tmp/$CORE_PKG"
+else
+    echo "[!] 警告: 无法下载对应的预编译核心包，将尝试静态二进制方案。"
 fi
 
-# 6. 回退方案：安装 LuCI 并下载静态二进制
+# 5. 回退方案：安装 LuCI 并下载静态二进制
 if [ "$INSTALLED_CORE" -eq 0 ]; then
     if [ -z "$BIN_ARCH" ]; then
         echo "错误: 无法确定适用于您架构的静态二进制文件 ($OWRT_ARCH)"
         exit 1
     fi
 
-    echo "[*] 正在通过强制依赖模式安装 LuCI 界面..."
-    opkg install "/tmp/$LUCI_IPK" --force-depends --force-reinstall
+    echo "[*] 正在强制安装 LuCI 界面..."
+    if [ "$PKG_CMD" = "apk" ]; then
+        apk add --allow-untrusted --nodeps "/tmp/$LUCI_PKG" || true
+    else
+        opkg install "/tmp/$LUCI_PKG" --force-depends --force-reinstall || true
+    fi
 
     BIN_FILE="rtsproxy-${VERSION}-linux-$BIN_ARCH"
     echo "[!] 准备下载并安装静态二进制文件: $BIN_FILE"
@@ -129,7 +134,7 @@ if [ "$INSTALLED_CORE" -eq 0 ]; then
     fi
 fi
 
-rm -f "/tmp/$LUCI_IPK"
+rm -f "/tmp/$LUCI_PKG"
 
 # 7. 启动服务
 echo "[*] 正在启动 RTSP Proxy 服务..."
