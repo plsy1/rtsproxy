@@ -55,17 +55,11 @@ jobs:
           fi
           
           # Update package version and release in Makefiles
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/rtsproxy/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/rtsproxy/Makefile
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$PKG_VER/" openwrt/luci-app-rtsproxy/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_REL/" openwrt/luci-app-rtsproxy/Makefile
           
-          # Copy source files to the rtsproxy package folder
-          cp -r src openwrt/rtsproxy/
-          cp -r include openwrt/rtsproxy/
-          cp -r webui openwrt/rtsproxy/
-          cp meson.build openwrt/rtsproxy/
-          cp meson_options.txt openwrt/rtsproxy/
+          # Remove rtsproxy directory from feed to bypass its C++ compilation
+          rm -rf openwrt/rtsproxy
           
           # Fix CRLF line endings
           find openwrt -type f -exec sed -i 's/\r$//' {} +
