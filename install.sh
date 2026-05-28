@@ -66,16 +66,16 @@ case "$OWRT_ARCH" in
     arm_cortex-a5*) BIN_ARCH="arm32hf" ;;
     arm*) BIN_ARCH="arm32" ;; # 其它 ARM32 设备使用软浮点保底
     
-    # MIPS 大端
-    mips_24kc) BIN_ARCH="mips32sf" ;; # MIPS 24Kc 是经典软浮点，运行硬浮点会导致非法指令崩溃
-    mips_mips32) BIN_ARCH="mips32sf" ;;
-    mips*) BIN_ARCH="mips32" ;; # 其它大端
-    
-    # MIPS 小端 (mipsel)
+    # MIPS 小端 (mipsel) - 必须放在 mips 大端之前，因为 mipsel 也是以 mips 开头！
     mipsel_24kc*) BIN_ARCH="mips32elsf" ;; # mipsel 24Kc (如 MT7620/MT7621 软路由) 是经典软浮点
     mipsel_74kc) BIN_ARCH="mips32el" ;; # mipsel 74Kc 支持硬浮点
     mipsel_mips32) BIN_ARCH="mips32elsf" ;;
     mipsel*) BIN_ARCH="mips32el" ;; # 其它小端
+    
+    # MIPS 大端
+    mips_24kc) BIN_ARCH="mips32sf" ;; # MIPS 24Kc 是经典软浮点，运行硬浮点会导致非法指令崩溃
+    mips_mips32) BIN_ARCH="mips32sf" ;;
+    mips*) BIN_ARCH="mips32" ;; # 其它大端
     
     # 其他现代架构
     riscv64) BIN_ARCH="riscv64" ;;
