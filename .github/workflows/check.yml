@@ -3,12 +3,16 @@ name: Build Check
 on:
   push:
     branches: [ "**" ]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'openwrt/**'
   pull_request:
     branches: [ "**" ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'openwrt/**'
   workflow_dispatch:
 
 env:
