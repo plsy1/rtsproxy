@@ -22,6 +22,7 @@ fi
 . /etc/openwrt_release
 OWRT_VERSION="${DISTRIB_RELEASE:-SNAPSHOT}"
 OWRT_ARCH="${DISTRIB_ARCH}"
+OWRT_MAJOR=$(echo "$OWRT_VERSION" | cut -d. -f1,2)
 
 if [ -z "$OWRT_ARCH" ]; then
     # 如果没有读取到 DISTRIB_ARCH 变量，则尝试回退用 opkg 获取
@@ -104,15 +105,23 @@ fi
 LUCI_PKG="luci-app-rtsproxy_${VERSION_FULL}_all.${SUFFIX}"
 CORE_PKG="rtsproxy_${VERSION_FULL}_openwrt-${SDK_VER}-${OWRT_ARCH}.${SUFFIX}"
 
+# 判断是否支持常规安装主程序包 (仅在 24.10.x 和 25.12.x 上使用系统包管理器安装 rtsproxy 核心包，其它老版本一律走静态二进制保底以防止库 ABI 不兼容崩溃)
+USE_PRECOMPILED=0
+if [ "$OWRT_MAJOR" = "24.10" ] || [ "$OWRT_MAJOR" = "25.12" ]; then
+    USE_PRECOMPILED=1
+fi
+
 # 5. 下载文件
 echo "[*] 正在从 GitHub 下载软件包..."
 wget -qO "/tmp/$LUCI_PKG" "$GITHUB_DOWNLOAD/$TAG/$LUCI_PKG" || true
-wget -qO "/tmp/$CORE_PKG" "$GITHUB_DOWNLOAD/$TAG/$CORE_PKG" || true
+if [ "$USE_PRECOMPILED" -eq 1 ]; then
+    wget -qO "/tmp/$CORE_PKG" "$GITHUB_DOWNLOAD/$TAG/$CORE_PKG" || true
+fi
 
 INSTALLED_CORE=0
 
 # 6. 尝试使用系统包管理器进行正常安装
-if [ -f "/tmp/$CORE_PKG" ] && [ -f "/tmp/$LUCI_PKG" ]; then
+if [ "$USE_PRECOMPILED" -eq 1 ] && [ -f "/tmp/$CORE_PKG" ] && [ -f "/tmp/$LUCI_PKG" ]; then
     echo "[*] 正在使用系统包管理器安装核心程序与网页界面..."
     if [ "$SUFFIX" = "apk" ]; then
         if apk add --allow-untrusted "/tmp/$CORE_PKG" "/tmp/$LUCI_PKG"; then
