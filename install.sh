@@ -1,5 +1,5 @@
 #!/bin/sh
-# RTSP Proxy One-Click Installer for OpenWrt
+# RTSP Proxy 一键安装脚本 (OpenWrt)
 # Repository: https://github.com/plsy1/rtsproxy
 
 set -e
@@ -18,130 +18,200 @@ if [ ! -f /etc/openwrt_release ]; then
     exit 1
 fi
 
-# 加载系统信息
+# 加载系统原生配置信息
 . /etc/openwrt_release
 OWRT_VERSION="${DISTRIB_RELEASE:-SNAPSHOT}"
-OWRT_MAJOR=$(echo "$OWRT_VERSION" | cut -d. -f1,2)
+OWRT_ARCH="${DISTRIB_ARCH}"
 
-# 获取 OpenWrt 架构
-OWRT_ARCH=$(opkg print-architecture | grep -v 'all' | grep -v 'noarch' | tail -n1 | awk '{print $2}')
+if [ -z "$OWRT_ARCH" ]; then
+    # 如果没有读取到 DISTRIB_ARCH 变量，则尝试回退用 opkg 获取
+    if command -v opkg >/dev/null 2>&1; then
+        OWRT_ARCH=$(opkg print-architecture | grep -v 'all' | grep -v 'noarch' | tail -n1 | awk '{print $2}')
+    else
+        OWRT_ARCH=$(uname -m)
+    fi
+fi
+
 UNAME_M=$(uname -m)
 
-echo "[*] 系统版本: OpenWrt $OWRT_VERSION"
+echo "[*] 系统版本: ${DISTRIB_ID:-OpenWrt} $OWRT_VERSION"
 echo "[*] 系统架构: $OWRT_ARCH ($UNAME_M)"
 
 # 2. 获取最新版本号
 echo "[*] 正在从 GitHub 获取最新版本信息..."
-# 获取发布列表中的第一个 tag_name (最新发布的版本)
 TAG=$(wget -qO- "$GITHUB_API" | grep '"tag_name":' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-VERSION=$(echo "$TAG" | sed 's/^v//')
+VERSION_FULL=$(echo "$TAG" | sed 's/^v//')
 
-if [ -z "$VERSION" ]; then
+if [ -z "$VERSION_FULL" ]; then
     echo "错误: 无法获取最新版本号，请检查网络连接。"
     exit 1
 fi
 
 echo "[*] 最新版本: $TAG"
 
-# 3. 映射静态二进制架构名
+# 3. 映射静态二进制架构名（精细化浮点数与EABI选择）
+# 配合 .github/workflows/static_binaries.yml 中编译的 27 个架构进行精准选择，防范 Illegal instruction 崩溃
 BIN_ARCH=""
 case "$OWRT_ARCH" in
+    # x86
     x86_64) BIN_ARCH="x86_64" ;;
-    aarch64_*) BIN_ARCH="arm64" ;;
-    arm_*) BIN_ARCH="arm32v7hf" ;;
-    mips_*) BIN_ARCH="mips32" ;;
-    mipsel_*) BIN_ARCH="mips32el" ;;
+    i386|i486|i586|i686) BIN_ARCH="i686" ;;
+    
+    # ARM64 (aarch64)
+    aarch64*) BIN_ARCH="arm64" ;;
+    
+    # ARM32 (OpenWrt ARMv7 路由器基本均支持硬浮点，使用 EABIhf)
+    arm_cortex-a7*|arm_cortex-a9*|arm_cortex-a15*) BIN_ARCH="arm32v7hf" ;;
+    arm_cortex-a5*) BIN_ARCH="arm32hf" ;;
+    arm*) BIN_ARCH="arm32" ;; # 其它 ARM32 设备使用软浮点保底
+    
+    # MIPS 大端
+    mips_24kc) BIN_ARCH="mips32sf" ;; # MIPS 24Kc 是经典软浮点，运行硬浮点会导致非法指令崩溃
+    mips_mips32) BIN_ARCH="mips32sf" ;;
+    mips*) BIN_ARCH="mips32" ;; # 其它大端
+    
+    # MIPS 小端 (mipsel)
+    mipsel_24kc*) BIN_ARCH="mips32elsf" ;; # mipsel 24Kc (如 MT7620/MT7621 软路由) 是经典软浮点
+    mipsel_74kc) BIN_ARCH="mips32el" ;; # mipsel 74Kc 支持硬浮点
+    mipsel_mips32) BIN_ARCH="mips32elsf" ;;
+    mipsel*) BIN_ARCH="mips32el" ;; # 其它小端
+    
+    # 其他现代架构
+    riscv64) BIN_ARCH="riscv64" ;;
+    loongarch64*) BIN_ARCH="loong64" ;;
 esac
 
-# 如果 OWRT_ARCH 没匹配上，试试 uname -m
+# 如果 OWRT_ARCH 没匹配成功，使用 uname -m 粗粒度映射保底
 if [ -z "$BIN_ARCH" ]; then
     case "$UNAME_M" in
         x86_64) BIN_ARCH="x86_64" ;;
         aarch64) BIN_ARCH="arm64" ;;
-        mips) BIN_ARCH="mips32" ;;
-        mipsel) BIN_ARCH="mips32el" ;;
+        mips) BIN_ARCH="mips32sf" ;;
+        mipsel) BIN_ARCH="mips32elsf" ;;
+        arm*) BIN_ARCH="arm32" ;;
     esac
 fi
 
-# 4. 检查包管理器和设置参数
+# 4. 检测包管理器并映射对应的编译后缀与 SDK 版本
 if command -v apk >/dev/null 2>&1; then
-    PKG_CMD="apk"
     SUFFIX="apk"
     SDK_VER="25.12.0"
 else
-    PKG_CMD="opkg"
     SUFFIX="ipk"
     SDK_VER="24.10.4"
 fi
 
-LUCI_PKG="luci-app-rtsproxy_${VERSION}_all.${SUFFIX}"
-CORE_PKG="rtsproxy_${VERSION}_openwrt-${SDK_VER}-${OWRT_ARCH}.${SUFFIX}"
+LUCI_PKG="luci-app-rtsproxy_${VERSION_FULL}_all.${SUFFIX}"
+CORE_PKG="rtsproxy_${VERSION_FULL}_openwrt-${SDK_VER}-${OWRT_ARCH}.${SUFFIX}"
 
-echo "[*] 正在从 GitHub 下载安装包..."
-if ! wget -qO "/tmp/$LUCI_PKG" "$GITHUB_DOWNLOAD/$TAG/$LUCI_PKG"; then
-    echo "[!] 错误: 无法下载 LuCI 安装包 ($LUCI_PKG)"
-    echo "    请确认 GitHub Release ($TAG) 中是否已包含该文件。"
-    exit 1
-fi
+# 5. 下载文件
+echo "[*] 正在从 GitHub 下载软件包..."
+wget -qO "/tmp/$LUCI_PKG" "$GITHUB_DOWNLOAD/$TAG/$LUCI_PKG" || true
+wget -qO "/tmp/$CORE_PKG" "$GITHUB_DOWNLOAD/$TAG/$CORE_PKG" || true
 
 INSTALLED_CORE=0
-# 尝试安装对应架构的预编译包
-echo "[*] 正在下载核心程序: $CORE_PKG"
-if wget -qO "/tmp/$CORE_PKG" "$GITHUB_DOWNLOAD/$TAG/$CORE_PKG"; then
-    echo "[*] 正在安装核心程序和 LuCI 界面..."
-    if [ "$PKG_CMD" = "apk" ]; then
+
+# 6. 尝试使用系统包管理器进行正常安装
+if [ -f "/tmp/$CORE_PKG" ] && [ -f "/tmp/$LUCI_PKG" ]; then
+    echo "[*] 正在使用系统包管理器安装核心程序与网页界面..."
+    if [ "$SUFFIX" = "apk" ]; then
         if apk add --allow-untrusted "/tmp/$CORE_PKG" "/tmp/$LUCI_PKG"; then
             INSTALLED_CORE=1
         else
-            echo "[!] APK 安装失败，准备尝试静态二进制回退方案..."
+            echo "[!] 软件包安装失败，准备尝试全静态二进制回退方案..."
         fi
     else
         if opkg install "/tmp/$CORE_PKG" "/tmp/$LUCI_PKG" --force-reinstall; then
             INSTALLED_CORE=1
         else
-            echo "[!] IPK 安装失败，准备尝试静态二进制回退方案..."
+            echo "[!] 软件包安装失败，准备尝试全静态二进制回退方案..."
         fi
     fi
-    rm -f "/tmp/$CORE_PKG"
-else
-    echo "[!] 警告: 无法下载对应的预编译核心包，将尝试静态二进制方案。"
 fi
 
-# 5. 回退方案：安装 LuCI 并下载静态二进制
+# 7. 回退保底方案：强装 LuCI 界面并下载全静态 musl 二进制
 if [ "$INSTALLED_CORE" -eq 0 ]; then
     if [ -z "$BIN_ARCH" ]; then
         echo "错误: 无法确定适用于您架构的静态二进制文件 ($OWRT_ARCH)"
         exit 1
     fi
 
-    echo "[*] 正在强制安装 LuCI 界面..."
-    if [ "$PKG_CMD" = "apk" ]; then
-        apk add --allow-untrusted --nodeps "/tmp/$LUCI_PKG" || true
+    # 7.1 强装 LuCI 界面（忽略对 rtsproxy 核心包的依赖）
+    if [ -f "/tmp/$LUCI_PKG" ]; then
+        echo "[*] 正在强行安装 LuCI 界面..."
+        if [ "$SUFFIX" = "apk" ]; then
+            apk add --allow-untrusted --nodeps "/tmp/$LUCI_PKG" || true
+        else
+            opkg install "/tmp/$LUCI_PKG" --force-depends --force-reinstall || true
+        fi
     else
-        opkg install "/tmp/$LUCI_PKG" --force-depends --force-reinstall || true
+        echo "[!] 警告: 未能找到本地的 LuCI 网页安装包，无法安装界面。"
     fi
 
-    BIN_FILE="rtsproxy-${VERSION}-linux-$BIN_ARCH"
-    echo "[!] 准备下载并安装静态二进制文件: $BIN_FILE"
+    # 7.2 下载静态二进制
+    BIN_FILE="rtsproxy-${VERSION_FULL}-linux-$BIN_ARCH"
+    echo "[*] 正在下载适用于当前架构的静态二进制主程序: $BIN_FILE"
     
     if wget -qO "/usr/bin/rtsproxy" "$GITHUB_DOWNLOAD/$TAG/$BIN_FILE"; then
         chmod +x /usr/bin/rtsproxy
-        echo "[*] 静态二进制安装成功。"
+        echo "[*] 静态二进制下载并安装成功。"
+        
+        # 7.3 手动写入启动服务与默认配置文件（因为跳过了核心包的安装）
+        echo "[*] 正在配置系统守护进程与服务项..."
+        mkdir -p /etc/init.d /etc/rtsproxy /etc/config
+        
+        # 写入 init 启动脚本 (procd)
+        cat << 'EOF' > /etc/init.d/rtsproxy
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/rtsproxy -c /etc/rtsproxy/config.json
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+EOF
+        chmod +x /etc/init.d/rtsproxy
+        
+        # 写入默认 JSON 配置文件
+        if [ ! -f /etc/rtsproxy/config.json ]; then
+            cat << 'EOF' > /etc/rtsproxy/config.json
+{
+    "http_port": 8080,
+    "rtsp_port": 554,
+    "auth_token": "admin"
+}
+EOF
+        fi
+        
+        # 写入默认 UCI 配置
+        if [ ! -f /etc/config/rtsproxy ]; then
+            cat << 'EOF' > /etc/config/rtsproxy
+config rtsproxy 'global'
+    option enabled '1'
+EOF
+        fi
+        
         INSTALLED_CORE=1
     else
-        echo "错误: 无法下载静态二进制文件 ($BIN_FILE)。"
+        echo "错误: 无法下载适用于您架构的静态二进制文件 ($BIN_FILE)。"
         exit 1
     fi
 fi
 
-rm -f "/tmp/$LUCI_PKG"
+# 清理缓存文件
+rm -f "/tmp/$LUCI_PKG" "/tmp/$CORE_PKG"
 
-# 7. 启动服务
-echo "[*] 正在启动 RTSP Proxy 服务..."
+# 8. 启动与开机自启服务
+echo "[*] 正在拉起并自启 RTSP Proxy 服务..."
 /etc/init.d/rtsproxy enable
 /etc/init.d/rtsproxy restart
 
 echo "==============================================="
-echo "   安装完成！"
+echo "   RTSP Proxy 安装成功！"
 echo "   您现在可以在 LuCI 菜单 '服务' -> 'RTSProxy' 中进行配置。"
 echo "==============================================="
