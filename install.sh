@@ -177,15 +177,23 @@ start_service() {
 EOF
         chmod +x /etc/init.d/rtsproxy
         
-        # 写入默认 JSON 配置文件
+        # 写入默认 JSON 配置文件（优先从 GitHub 对应 Tag 下载，确保版本配置契合）
         if [ ! -f /etc/rtsproxy/config.json ]; then
-            cat << 'EOF' > /etc/rtsproxy/config.json
+            echo "[*] 正在从 GitHub 仓库下载标准配置文件..."
+            if ! wget -qO "/etc/rtsproxy/config.json" "https://raw.githubusercontent.com/$REPO/$TAG/config.json"; then
+                echo "[!] 警告: 无法下载 Tag 版本的配置文件，尝试下载主分支配置..."
+                if ! wget -qO "/etc/rtsproxy/config.json" "https://raw.githubusercontent.com/$REPO/main/config.json"; then
+                    echo "[!] 警告: 无法从 GitHub 获取默认配置文件，写入一个极简本地配置保底。"
+                    cat << 'EOF' > /etc/rtsproxy/config.json
 {
-    "http_port": 8080,
-    "rtsp_port": 554,
-    "auth_token": "admin"
+    "settings": {
+        "port": 8554,
+        "log_level": "info"
+    }
 }
 EOF
+                fi
+            fi
         fi
         
         # 写入默认 UCI 配置
