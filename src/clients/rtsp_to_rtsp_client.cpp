@@ -63,11 +63,14 @@ RTSPToRtspClient::RTSPToRtspClient(EpollLoop *loop, BufferPool &pool,
           client_fd,
           [this](uint32_t ev) { handle_downstream(ev); })),
       client_addr_(client_addr),
+      upstream_fd_(-1, loop),
       rtp_us_fd_(-1, loop),
       rtcp_us_fd_(-1, loop),
       rtp_ds_fd_(-1, loop),
       rtcp_ds_fd_(-1, loop),
       timer_fd_(-1, loop),
+      redirect_count_(0),
+      last_downstream_req_(first_request),
       ctx_(config.ctx),
       proxy_uri_prefix_(config.proxy_uri_prefix),
       upstream_uri_base_(config.upstream_uri_base),
@@ -873,6 +876,8 @@ void RTSPToRtspClient::on_downstream_readable()
         std::string req = downstream_recv_buf_.substr(0, end + 4);
         downstream_recv_buf_ = downstream_recv_buf_.substr(end + 4);
 
+        last_downstream_req_ = req;
+
         // Check if this is a SETUP request — we need to prepare relay sockets.
         bool is_setup = (req.find("SETUP ") == 0);
         bool is_play  = (req.find("PLAY ") == 0);
@@ -1131,6 +1136,60 @@ void RTSPToRtspClient::on_upstream_readable()
         rtspParser::parse_session_id(resp, ctx_);
 
         int status = rtspParser::parse_status_code(resp);
+
+        if (status == 301 || status == 302)
+        {
+            std::string location = rtspParser::extract_header_value(resp, "Location");
+            if (location.empty())
+            {
+                Logger::error("[MITM] Redirect status " + std::to_string(status) + " received but Location header is missing.");
+                close_all();
+                return;
+            }
+
+            if (++redirect_count_ > 3)
+            {
+                Logger::error("[MITM] Too many redirects (limit 3 exceeded).");
+                close_all();
+                return;
+            }
+
+            Logger::info("[MITM] Redirecting to " + location + " (Hop " + std::to_string(redirect_count_) + ")");
+
+            rtspCtx temp_ctx;
+            if (rtspParser::parse_url(location, temp_ctx) != 0)
+            {
+                Logger::error("[MITM] Failed to parse redirect Location URL: " + location);
+                close_all();
+                return;
+            }
+
+            // Update ctx_ with the new location info
+            ctx_.server_ip = temp_ctx.server_ip;
+            ctx_.server_rtsp_port = temp_ctx.server_rtsp_port;
+            ctx_.path = temp_ctx.path;
+            ctx_.rtsp_url = temp_ctx.rtsp_url;
+
+            // Rebuild upstream_uri_base_
+            upstream_uri_base_ = "rtsp://" + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port);
+
+            // Tear down old connection
+            upstream_ctx_.reset();
+            upstream_fd_ = -1; // Closes and removes from epoll
+
+            // Clear buffers and queues
+            upstream_recv_buf_.clear();
+            to_upstream_q_.clear();
+            upstream_send_offset_ = 0;
+
+            // Rewrite the original downstream request to point to the new upstream URL
+            std::string rewritten_req = rewrite_request_for_upstream(last_downstream_req_);
+            to_upstream_q_.push_back(rewritten_req);
+
+            // Connect to the new upstream server
+            connect_upstream();
+            return;
+        }
 
         // -----------------------------------------------------------
         // Auto-fallback to TCP if UDP is not supported (Status 461)

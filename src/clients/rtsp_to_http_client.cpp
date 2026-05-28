@@ -28,7 +28,11 @@ RTSPToHttpClient::RTSPToHttpClient(EpollLoop *loop, BufferPool &pool, const sock
       rtp_pipeline_(std::make_unique<RtpPipeline>()),
       client_ctx_(std::make_unique<SocketCtx>(client_fd, [this](uint32_t event)
                                               { handle_client(event); })),
-      timer_fd_(-1, loop_)
+      rtsp_fd_(-1, loop_),
+      rtp_fd_(-1, loop_),
+      rtcp_fd_(-1, loop_),
+      timer_fd_(-1, loop_),
+      redirect_count_(0)
 {
     loop_->remove(client_fd);
 
@@ -258,6 +262,61 @@ void RTSPToHttpClient::on_rtsp_readable()
                     setup_retry_with_tcp_ = true;
                     send_rtsp_setup();
                     continue;
+                }
+
+                if (status == 301 || status == 302)
+                {
+                    std::string location = rtspParser::extract_header_value(header, "Location");
+                    if (location.empty())
+                    {
+                        Logger::error("[RTSP] Redirect status " + std::to_string(status) + " received but Location header is missing.");
+                        on_closed_callback_();
+                        return;
+                    }
+
+                    if (++redirect_count_ > 3)
+                    {
+                        Logger::error("[RTSP] Too many redirects (limit 3 exceeded).");
+                        on_closed_callback_();
+                        return;
+                    }
+
+                    Logger::info("[RTSP] Redirecting to " + location + " (Hop " + std::to_string(redirect_count_) + ")");
+
+                    rtspCtx temp_ctx;
+                    if (rtspParser::parse_url(location, temp_ctx) != 0)
+                    {
+                        Logger::error("[RTSP] Failed to parse redirect Location URL: " + location);
+                        on_closed_callback_();
+                        return;
+                    }
+
+                    ctx.server_ip = temp_ctx.server_ip;
+                    ctx.server_rtsp_port = temp_ctx.server_rtsp_port;
+                    ctx.path = temp_ctx.path;
+                    ctx.rtsp_url = temp_ctx.rtsp_url;
+
+                    current_request_.uri = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
+                    
+                    req_buf_.clear();
+                    req_buf_ += RtspMethodToString(current_request_.method) + " " + current_request_.uri + " RTSP/1.0\r\n";
+                    req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
+                    if (!ctx.session_id.empty())
+                        req_buf_ += "Session: " + ctx.session_id + "\r\n";
+                    req_buf_ += current_request_.headers;
+                    if (!current_request_.body.empty())
+                        req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;
+                    else
+                        req_buf_ += "\r\n";
+
+                    tcp_send_offset_ = 0;
+                    resp_buf_.clear();
+
+                    rtsp_ctx_.reset();
+                    rtsp_fd_ = -1;
+
+                    connect_server();
+                    return;
                 }
 
                 if (status != 200)

@@ -150,6 +150,7 @@ private:
     uint8_t interleaved_rtp_channel_{0};
     uint8_t interleaved_rtcp_channel_{1};
     bool setup_retry_with_tcp_{false};
+    int redirect_count_{0};
 
     std::string local_ip_;
     uint16_t local_tcp_port_{0};

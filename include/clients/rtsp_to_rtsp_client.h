@@ -210,6 +210,8 @@ private:
     uint8_t us_interleaved_rtcp_{1};
     bool setup_retry_with_tcp_{false};
     std::string last_setup_req_;
+    int redirect_count_{0};
+    std::string last_downstream_req_;
 
     rtspCtx ctx_; // parsed URL info for upstream
 
