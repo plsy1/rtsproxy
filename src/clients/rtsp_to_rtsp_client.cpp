@@ -485,6 +485,18 @@ std::string RTSPToRtspClient::rewrite_request_for_upstream(const std::string &re
         uri = upstream_uri_base_ + uri.substr(proxy_uri_prefix_.size());
     }
 
+    // Clean up uri: replace "%5C", "%5c", and "\\" with empty string
+    size_t pos;
+    while ((pos = uri.find("%5C")) != std::string::npos) {
+        uri.replace(pos, 3, "");
+    }
+    while ((pos = uri.find("%5c")) != std::string::npos) {
+        uri.replace(pos, 3, "");
+    }
+    while ((pos = uri.find('\\')) != std::string::npos) {
+        uri.replace(pos, 1, "");
+    }
+
     return method + " " + uri + " " + rtsp_ver + rest;
 }
 

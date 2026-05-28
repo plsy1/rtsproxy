@@ -15,6 +15,18 @@ RequestInfo RequestParser::parse(const std::string &request_data)
 
     info.is_http = (info.version.find("HTTP/") == 0);
 
+    // Clean up info.raw_uri: remove backslashes (escaping)
+    size_t pos;
+    while ((pos = info.raw_uri.find("%5C")) != std::string::npos) {
+        info.raw_uri.replace(pos, 3, "");
+    }
+    while ((pos = info.raw_uri.find("%5c")) != std::string::npos) {
+        info.raw_uri.replace(pos, 3, "");
+    }
+    while ((pos = info.raw_uri.find('\\')) != std::string::npos) {
+        info.raw_uri.replace(pos, 1, "");
+    }
+
     if (ServerConfig::getToken().empty())
     {
         info.is_authorized = true;

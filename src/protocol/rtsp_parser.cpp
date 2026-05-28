@@ -217,12 +217,24 @@ int rtspParser::parse_session_id(const std::string &resp, rtspCtx &ctx)
 
 int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
 {
-    ctx.rtsp_url = url;
-    if (url.rfind("rtsp://", 0) != 0)
+    std::string clean_url = url;
+    size_t pos;
+    while ((pos = clean_url.find("%5C")) != std::string::npos) {
+        clean_url.replace(pos, 3, "");
+    }
+    while ((pos = clean_url.find("%5c")) != std::string::npos) {
+        clean_url.replace(pos, 3, "");
+    }
+    while ((pos = clean_url.find('\\')) != std::string::npos) {
+        clean_url.replace(pos, 1, "");
+    }
+
+    ctx.rtsp_url = clean_url;
+    if (clean_url.rfind("rtsp://", 0) != 0)
         return -1;
 
-    size_t slash = url.find('/', 7);
-    std::string hostport = url.substr(7, (slash == std::string::npos) ? std::string::npos : slash - 7);
+    size_t slash = clean_url.find('/', 7);
+    std::string hostport = clean_url.substr(7, (slash == std::string::npos) ? std::string::npos : slash - 7);
     if (hostport.empty())
     {
         return -1;
@@ -244,11 +256,11 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     }
     catch (...)
     {
-        Logger::error("[RTSP] Failed to parse port in URL: " + url);
+        Logger::error("[RTSP] Failed to parse port in URL: " + clean_url);
         return -1;
     }
 
-    ctx.path = (slash != std::string::npos) ? url.substr(slash) : "/";
+    ctx.path = (slash != std::string::npos) ? clean_url.substr(slash) : "/";
 
     return 0;
 }
