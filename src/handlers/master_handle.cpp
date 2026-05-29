@@ -62,6 +62,6 @@ void MasterHandle::handle(int client_fd, sockaddr_in client_addr, EpollLoop *loo
     }
 
     // --- No handler matched ---
-    Logger::error("[MASTER] No handler found for " + client_host + " request: " + info.clean_uri);
+    Logger::debug("[MASTER] No handler found for " + client_host + " request: " + info.clean_uri);
     close(client_fd);
 }

@@ -1,8 +1,28 @@
 #include "protocol/request_parser.h"
 #include "core/server_config.h"
 #include "utils/url_rewriter.h"
-#include <sstream>
+#include <cstdio>
 
+static std::string sanitize_input(const std::string &s)
+{
+    std::string result;
+    result.reserve(s.size());
+    for (char c : s)
+    {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (uc >= 32 && uc <= 126)
+        {
+            result += c;
+        }
+        else
+        {
+            char buf[5];
+            snprintf(buf, sizeof(buf), "\\x%02x", uc);
+            result += buf;
+        }
+    }
+    return result;
+}
 
 RequestInfo RequestParser::parse(const std::string &request_data)
 {
@@ -13,6 +33,8 @@ RequestInfo RequestParser::parse(const std::string &request_data)
         return info;
     }
 
+    info.method = sanitize_input(info.method);
+    info.version = sanitize_input(info.version);
     info.is_http = (info.version.find("HTTP/") == 0);
 
     // Clean up info.raw_uri: remove backslashes (escaping)
@@ -27,6 +49,7 @@ RequestInfo RequestParser::parse(const std::string &request_data)
         info.raw_uri.replace(pos, 1, "");
     }
 
+    info.raw_uri = sanitize_input(info.raw_uri);
     if (ServerConfig::getToken().empty())
     {
         info.is_authorized = true;
