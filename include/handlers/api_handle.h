@@ -10,8 +10,8 @@ class ApiHandle
 public:
     /**
      * Centralized dispatcher for administrative tasks:
-     * - /api/*
-     * - /admin/*
+     * - paths under /api/
+     * - paths under /admin/
      * - /favicon.ico
      * Also handles unauthorized access for these paths.
      * @return true if handled, false if it's a streaming request.
@@ -19,8 +19,8 @@ public:
     static bool dispatch(int client_fd, const RequestInfo &info, EpollLoop *loop, BufferPool &pool);
 
 private:
-    static void serve_admin_file(int client_fd, const RequestInfo &info);
-    static void send_json_response(int client_fd, const nlohmann::json &j);
-    static void send_unauthorized(int client_fd);
+    static void serve_admin_file(int client_fd, const RequestInfo &info, EpollLoop *loop);
+    static void send_json_response(int client_fd, const nlohmann::json &j, EpollLoop *loop);
+    static void send_unauthorized(int client_fd, EpollLoop *loop);
     static std::string get_mime_type(const std::string &path);
 };

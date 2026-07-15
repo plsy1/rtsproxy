@@ -1,109 +1,245 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTSProxy Dashboard</title>
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#07110f">
+    <title>RTSProxy · 实时控制台</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="title-group">
-                <h1>RTSProxy Dashboard</h1>
-            </div>
-            <div class="status-badge" id="server-status">
-                <span class="dot"></span> ONLINE
+    <div class="ambient ambient-top" aria-hidden="true"></div>
+    <div class="ambient ambient-side" aria-hidden="true"></div>
+
+    <div class="app-shell">
+        <header class="topbar">
+            <a class="brand" id="brand-home" href="/admin/" aria-label="RTSProxy 首页">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" role="img">
+                        <path d="M7 10.5c5.6-4.7 12.4-4.7 18 0"></path>
+                        <path d="M10.5 14.5c3.4-2.8 7.6-2.8 11 0"></path>
+                        <path d="M13.8 18.5c1.4-1.1 3-1.1 4.4 0"></path>
+                        <circle cx="16" cy="23" r="2.3"></circle>
+                    </svg>
+                </span>
+                <span>
+                    <strong>RTSProxy</strong>
+                    <small>STREAM GATEWAY</small>
+                </span>
+            </a>
+
+            <div class="topbar-actions">
+                <div class="sync-info">
+                    <span>最后更新</span>
+                    <strong id="last-updated">正在连接</strong>
+                </div>
+                <button class="icon-button" id="refresh-now" type="button" aria-label="立即刷新" title="立即刷新">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"></path>
+                        <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"></path>
+                    </svg>
+                </button>
+                <div class="status-pill connecting" id="server-status" role="status" aria-live="polite">
+                    <span class="status-dot"></span>
+                    <span id="server-status-text">连接中</span>
+                </div>
             </div>
         </header>
 
-        <!-- STATUS ROW 1: Performance -->
-        <div class="status-bar">
-            <div class="stat-item">
-                <span class="label">Up Bandwidth</span>
-                <span class="value" id="up-bandwidth">0 Mbps</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Down Bandwidth</span>
-                <span class="value" id="down-bandwidth">0 Mbps</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Up Traffic</span>
-                <span class="value" id="up-traffic">0 B</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Down Traffic</span>
-                <span class="value" id="down-traffic">0 B</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Clients</span>
-                <span class="value" id="active-clients">0</span>
-            </div>
-        </div>
-
-        <!-- STATUS ROW 2: Memory -->
-        <div class="status-bar">
-            <div class="stat-item">
-                <span class="label">Used Buffers</span>
-                <span class="value" id="used-count">0</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Total Buffers</span>
-                <span class="value" id="total-buffers">0</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Total RAM</span>
-                <span class="value" id="total-memory">0 MB</span>
-            </div>
-        </div>
-
-        <main class="main-content">
-            <!-- LEFT: Active Sessions -->
-            <section class="sessions-area">
-                <div class="card-header">
-                    <h2>Active Sessions</h2>
+        <main>
+            <section class="page-heading">
+                <div>
+                    <p class="eyebrow">REALTIME MONITOR</p>
+                    <h1>流媒体运行概览</h1>
+                    <p class="heading-copy">实时观察代理流量、客户端会话与缓冲池状态。</p>
                 </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Downstream</th>
-                                <th>Upstream</th>
-                                <th>Type</th>
-                                <th>Up Bitrate</th>
-                                <th>Down Bitrate</th>
-                                <th>Protocol</th>
-                                <th>Duration</th>
-                            </tr>
-                        </thead>
-                        <tbody id="sessions-body">
-                            <!-- JS populated -->
-                        </tbody>
-                    </table>
-                </div>
+                <div class="live-label"><span></span> LIVE DATA</div>
             </section>
 
-            <!-- RIGHT: Live Logs -->
-            <section class="logs-area">
-                <div class="card-header">
-                    <h2>Live Logs</h2>
-                    <div class="controls">
-                        <select id="log-level-select">
-                            <option value="0">DEBUG</option>
-                            <option value="1" selected>INFO</option>
-                            <option value="2">WARN</option>
-                            <option value="3">ERROR</option>
-                        </select>
-                        <button id="clear-logs">Clear</button>
+            <section class="metric-grid" aria-label="核心指标">
+                <article class="metric-card metric-up">
+                    <div class="metric-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"></path></svg>
                     </div>
-                </div>
-                <div class="log-container" id="log-display">
-                    <!-- Logs will appear here -->
-                </div>
+                    <div class="metric-content">
+                        <span class="metric-label">上行带宽</span>
+                        <strong class="metric-value" id="up-bandwidth">0 bps</strong>
+                        <span class="metric-meta">累计 <b id="up-traffic">0 B</b></span>
+                    </div>
+                </article>
+
+                <article class="metric-card metric-down">
+                    <div class="metric-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M12 5v14M17.5 13.5 12 19l-5.5-5.5"></path></svg>
+                    </div>
+                    <div class="metric-content">
+                        <span class="metric-label">下行带宽</span>
+                        <strong class="metric-value" id="down-bandwidth">0 bps</strong>
+                        <span class="metric-meta">累计 <b id="down-traffic">0 B</b></span>
+                    </div>
+                </article>
+
+                <article class="metric-card metric-clients">
+                    <div class="metric-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M16 19v-1.4a3.6 3.6 0 0 0-3.6-3.6H7.6A3.6 3.6 0 0 0 4 17.6V19"></path>
+                            <circle cx="10" cy="7.5" r="3.5"></circle>
+                            <path d="M17 10.5a3 3 0 0 1 3 3V15"></path>
+                        </svg>
+                    </div>
+                    <div class="metric-content">
+                        <span class="metric-label">活跃客户端</span>
+                        <strong class="metric-value" id="active-clients">0</strong>
+                        <span class="metric-meta"><i class="mini-pulse"></i> 当前连接数</span>
+                    </div>
+                </article>
+
+                <article class="metric-card metric-buffer">
+                    <div class="metric-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24">
+                            <rect x="4" y="5" width="16" height="5" rx="2"></rect>
+                            <rect x="4" y="14" width="16" height="5" rx="2"></rect>
+                            <path d="M8 7.5h.01M8 16.5h.01"></path>
+                        </svg>
+                    </div>
+                    <div class="metric-content metric-buffer-content">
+                        <span class="metric-label">缓冲池占用</span>
+                        <strong class="metric-value" id="buffer-usage">0%</strong>
+                        <span class="metric-meta" id="buffer-summary">0 / 0 buffers</span>
+                    </div>
+                    <div class="metric-progress" aria-hidden="true"><span id="buffer-progress"></span></div>
+                </article>
+            </section>
+
+            <section class="insight-grid">
+                <article class="panel traffic-panel">
+                    <div class="panel-header">
+                        <div>
+                            <p class="panel-kicker">NETWORK</p>
+                            <h2>实时吞吐趋势</h2>
+                        </div>
+                        <div class="chart-legend" aria-label="图例">
+                            <span><i class="legend-up"></i>上行</span>
+                            <span><i class="legend-down"></i>下行</span>
+                        </div>
+                    </div>
+                    <div class="chart-summary">
+                        <div><span>当前上行</span><strong id="chart-up-value">0 bps</strong></div>
+                        <div><span>当前下行</span><strong id="chart-down-value">0 bps</strong></div>
+                        <div class="chart-scale"><span>图表峰值</span><strong id="chart-max-value">1 Mbps</strong></div>
+                    </div>
+                    <div class="chart-wrap" aria-label="最近 60 秒带宽趋势图">
+                        <svg class="traffic-chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img">
+                            <defs>
+                                <linearGradient id="up-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="#52e0b7" stop-opacity=".3"></stop>
+                                    <stop offset="100%" stop-color="#52e0b7" stop-opacity="0"></stop>
+                                </linearGradient>
+                                <linearGradient id="down-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="#6d9dff" stop-opacity=".25"></stop>
+                                    <stop offset="100%" stop-color="#6d9dff" stop-opacity="0"></stop>
+                                </linearGradient>
+                            </defs>
+                            <g class="chart-grid" aria-hidden="true">
+                                <line x1="0" y1="10" x2="600" y2="10"></line>
+                                <line x1="0" y1="62.5" x2="600" y2="62.5"></line>
+                                <line x1="0" y1="115" x2="600" y2="115"></line>
+                                <line x1="0" y1="167.5" x2="600" y2="167.5"></line>
+                            </g>
+                            <path id="chart-up-area" class="chart-area up-area" d=""></path>
+                            <path id="chart-down-area" class="chart-area down-area" d=""></path>
+                            <polyline id="chart-up-line" class="chart-line up-line" points=""></polyline>
+                            <polyline id="chart-down-line" class="chart-line down-line" points=""></polyline>
+                        </svg>
+                        <div class="chart-axis"><span>60 秒前</span><span>现在</span></div>
+                    </div>
+                </article>
+
+                <article class="panel pool-panel">
+                    <div class="panel-header">
+                        <div>
+                            <p class="panel-kicker">MEMORY POOL</p>
+                            <h2>缓冲池状态</h2>
+                        </div>
+                        <span class="health-chip" id="pool-health">健康</span>
+                    </div>
+                    <div class="pool-content">
+                        <div class="buffer-gauge" id="buffer-gauge" role="img" aria-label="缓冲池占用 0%">
+                            <div>
+                                <strong id="gauge-value">0%</strong>
+                                <span>已占用</span>
+                            </div>
+                        </div>
+                        <dl class="pool-stats">
+                            <div><dt>正在使用</dt><dd id="used-count">0</dd></div>
+                            <div><dt>可用缓冲</dt><dd id="available-count">0</dd></div>
+                            <div><dt>峰值占用</dt><dd id="peak-count">0</dd></div>
+                            <div><dt>内存容量</dt><dd id="total-memory">0 B</dd></div>
+                        </dl>
+                    </div>
+                </article>
+            </section>
+
+            <section class="workspace-grid">
+                <article class="panel sessions-panel">
+                    <div class="panel-header">
+                        <div>
+                            <p class="panel-kicker">CONNECTIONS</p>
+                            <h2>活动会话 <span class="count-badge" id="session-count">0</span></h2>
+                        </div>
+                        <span class="panel-note">每秒自动刷新</span>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>客户端</th>
+                                    <th>上游节点</th>
+                                    <th>代理模式</th>
+                                    <th>实时速率</th>
+                                    <th>传输</th>
+                                    <th>持续时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessions-body"></tbody>
+                        </table>
+                    </div>
+                </article>
+
+                <article class="panel logs-panel">
+                    <div class="panel-header logs-header">
+                        <div>
+                            <p class="panel-kicker">EVENT STREAM</p>
+                            <h2>运行日志</h2>
+                        </div>
+                        <div class="log-actions">
+                            <label class="log-search">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+                                <input id="log-search" type="search" placeholder="搜索日志" autocomplete="off" aria-label="搜索日志">
+                            </label>
+                            <select id="log-level-select" aria-label="最低日志等级">
+                                <option value="0">DEBUG+</option>
+                                <option value="1" selected>INFO+</option>
+                                <option value="2">WARN+</option>
+                                <option value="3">ERROR</option>
+                            </select>
+                            <button class="text-button" id="pause-logs" type="button">暂停</button>
+                            <button class="text-button danger" id="clear-logs" type="button">清空</button>
+                        </div>
+                    </div>
+                    <div class="log-container" id="log-display" aria-live="polite"></div>
+                </article>
             </section>
         </main>
+
+        <footer>
+            <span>RTSProxy Control Plane</span>
+            <span class="footer-divider"></span>
+            <span>WebUI 2.0</span>
+        </footer>
     </div>
+
     <script src="main.js"></script>
 </body>
 </html>

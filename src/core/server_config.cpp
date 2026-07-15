@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <cstring>
+#include <stdexcept>
 
 int ServerConfig::port = 8554;
 bool ServerConfig::enable_nat = false;
@@ -110,6 +111,8 @@ void ServerConfig::parseCommandLine(int argc, char *argv[])
 
 void ServerConfig::setPort(int p)
 {
+    if (p < 1 || p > 65535)
+        throw std::out_of_range("listen port must be in range 1..65535");
     port = p;
 }
 
@@ -120,21 +123,29 @@ void ServerConfig::setNatEnabled(bool enable)
 
 void ServerConfig::setNatMethod(const std::string &method)
 {
+    if (method != "stun" && method != "zte")
+        throw std::invalid_argument("nat_method must be 'stun' or 'zte'");
     nat_method = method;
 }
 
 void ServerConfig::setBufferPoolCount(int count)
 {
+    if (count < 1 || count > 262144)
+        throw std::out_of_range("buffer_pool_count must be in range 1..262144");
     buffer_pool_count = count;
 }
 
 void ServerConfig::setBufferPoolBlockSize(int size)
 {
+    if (size < 64 || size > 65536)
+        throw std::out_of_range("buffer_pool_block_size must be in range 64..65536");
     buffer_pool_block_size = size;
 }
 
 void ServerConfig::setStunPort(int port)
 {
+    if (port < 1 || port > 65535)
+        throw std::out_of_range("STUN port must be in range 1..65535");
     stun_server_port = port;
 }
 
