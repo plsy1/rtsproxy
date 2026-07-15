@@ -76,7 +76,7 @@ private:
     };
 
 private:
-    void connect_server();
+    bool connect_server();
     void handle_rtsp(uint32_t event);
     void handle_rtp(uint32_t event);
     void handle_rtcp(uint32_t event);
@@ -139,6 +139,7 @@ private:
 
     std::queue<RtspRequest> request_queue_;
     RtspRequest current_request_;
+    bool request_in_flight_{false};
 
     uint16_t rtp_port_{0};
     sockaddr_in server_rtp_addr_{};

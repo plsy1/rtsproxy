@@ -89,7 +89,7 @@ private:
     /* ------------------------------------------------------------------ */
     /* Internal helpers                                                     */
     /* ------------------------------------------------------------------ */
-    void connect_upstream();
+    bool connect_upstream();
 
     // Patch the SETUP request's Transport header: replace client_port with
     // our local RTP/RTCP port pair.
@@ -151,6 +151,7 @@ private:
     void on_downstream_closed();
     void on_upstream_readable();
     void on_upstream_writable();
+    void finish_upstream_connection();
     void send_rtp_trigger();
     void send_zte_heartbeat();
     void process_pending_setup();
@@ -230,6 +231,9 @@ private:
     // Whether the relay sockets have been set up (after SETUP)
     bool relay_ready_{false};
     bool closed_{false};
+    bool close_after_downstream_flush_{false};
+    uint32_t keepalive_cseq_{1000000000};
+    bool keepalive_pending_{false};
 
     // Track whether we forwarded a PLAY so we can correctly detect the response
     bool pending_play_{false};

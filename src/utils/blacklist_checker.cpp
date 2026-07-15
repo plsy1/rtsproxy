@@ -48,7 +48,19 @@ bool BlacklistChecker::match_cidr(const std::string &ip, const std::string &cidr
     if (slash_pos == std::string::npos) return ip == cidr;
 
     std::string base_ip_str = cidr.substr(0, slash_pos);
-    int bits = std::stoi(cidr.substr(slash_pos + 1));
+    int bits = 0;
+    try
+    {
+        size_t parsed = 0;
+        std::string bits_str = cidr.substr(slash_pos + 1);
+        bits = std::stoi(bits_str, &parsed);
+        if (parsed != bits_str.size() || bits < 0 || bits > 32)
+            return false;
+    }
+    catch (...)
+    {
+        return false;
+    }
 
     struct in_addr base_addr, target_addr;
     if (inet_pton(AF_INET, base_ip_str.c_str(), &base_addr) != 1) return false;

@@ -1,11 +1,14 @@
 #include "protocol/rtsp_parser.h"
 #include "core/logger.h"
 #include "common/rtsp_ctx.h"
+#include "utils/dns_resolver.h"
 #include <unistd.h>
 #include <cstring>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <limits>
+#include <arpa/inet.h>
 
 rtspParser::rtspParser() {}
 rtspParser::~rtspParser() {}
@@ -117,12 +120,9 @@ void rtspParser::SDP::parseBandwidth(const std::string &line, rtspCtx &ctx)
 
 int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
 {
-    size_t pos = resp.find("Transport:");
-    if (pos == std::string::npos)
+    std::string transport_ = extract_header_value(resp, "Transport");
+    if (transport_.empty())
         return -1;
-
-    size_t end = resp.find("\r\n", pos);
-    std::string transport_ = resp.substr(pos, end - pos);
 
     size_t sp_pos = transport_.find("server_port=");
     if (sp_pos != std::string::npos)
@@ -133,8 +133,13 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
         {
             try
             {
-                ctx.server_rtp_port = std::stoi(transport_.substr(sp_pos, dash - sp_pos));
-                ctx.server_rtcp_port = std::stoi(transport_.substr(dash + 1));
+                int rtp_port = std::stoi(transport_.substr(sp_pos, dash - sp_pos));
+                int rtcp_port = std::stoi(transport_.substr(dash + 1));
+                if (rtp_port < 1 || rtp_port > 65535 ||
+                    rtcp_port < 1 || rtcp_port > 65535)
+                    return -1;
+                ctx.server_rtp_port = static_cast<uint16_t>(rtp_port);
+                ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_port);
                 return 0;
             }
             catch (...)
@@ -155,8 +160,13 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
             // The caller (RTSPToHttpClient) will check for "interleaved" in the string anyway
             try
             {
-                ctx.server_rtp_port = std::stoi(transport_.substr(int_pos, dash - int_pos));
-                ctx.server_rtcp_port = std::stoi(transport_.substr(dash + 1));
+                int rtp_channel = std::stoi(transport_.substr(int_pos, dash - int_pos));
+                int rtcp_channel = std::stoi(transport_.substr(dash + 1));
+                if (rtp_channel < 0 || rtp_channel > 255 ||
+                    rtcp_channel < 0 || rtcp_channel > 255)
+                    return -1;
+                ctx.server_rtp_port = static_cast<uint16_t>(rtp_channel);
+                ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_channel);
                 return 0;
             }
             catch (...)
@@ -171,27 +181,25 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
 
 int rtspParser::get_content_length(const std::string &resp)
 {
-    size_t pos = resp.find("Content-Length:");
-    if (pos == std::string::npos)
-        pos = resp.find("Content-length:");
-    if (pos == std::string::npos)
-        return 0;
-
-    pos += 15;
-    while (pos < resp.size() && (resp[pos] == ' ' || resp[pos] == '\t'))
-        ++pos;
-
-    size_t end = resp.find_first_of("\r\n", pos);
-    if (end == std::string::npos)
+    std::string value = extract_header_value(resp, "Content-Length");
+    if (value.empty())
         return 0;
 
     try
     {
-        return std::stoi(resp.substr(pos, end - pos));
+        size_t parsed = 0;
+        long long length = std::stoll(value, &parsed);
+        while (parsed < value.size() &&
+               (value[parsed] == ' ' || value[parsed] == '\t'))
+            ++parsed;
+        if (parsed != value.size() || length < 0 ||
+            length > std::numeric_limits<int>::max())
+            return -1;
+        return static_cast<int>(length);
     }
     catch (...)
     {
-        return 0;
+        return -1;
     }
 }
 
@@ -204,14 +212,11 @@ int rtspParser::parse_status_code(const std::string &resp)
 
 int rtspParser::parse_session_id(const std::string &resp, rtspCtx &ctx)
 {
-    size_t pos = resp.find("Session:");
-    if (pos == std::string::npos)
+    std::string session = extract_header_value(resp, "Session");
+    if (session.empty())
         return -1;
-    pos += 8;
-    while (pos < resp.size() && (resp[pos] == ' ' || resp[pos] == '\t'))
-        ++pos;
-    size_t end = resp.find_first_of(";\r\n", pos);
-    ctx.session_id = resp.substr(pos, end - pos);
+    size_t end = session.find(';');
+    ctx.session_id = session.substr(0, end);
     return 0;
 }
 
@@ -246,7 +251,11 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
         if (colon != std::string::npos)
         {
             ctx.server_ip = hostport.substr(0, colon);
-            ctx.server_rtsp_port = std::stoi(hostport.substr(colon + 1));
+            size_t parsed = 0;
+            int port = std::stoi(hostport.substr(colon + 1), &parsed);
+            if (parsed != hostport.size() - colon - 1 || port < 1 || port > 65535)
+                return -1;
+            ctx.server_rtsp_port = static_cast<uint16_t>(port);
         }
         else
         {
@@ -258,6 +267,18 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     {
         Logger::error("[RTSP] Failed to parse port in URL: " + clean_url);
         return -1;
+    }
+
+    struct in_addr numeric_addr{};
+    if (inet_pton(AF_INET, ctx.server_ip.c_str(), &numeric_addr) != 1)
+    {
+        auto addresses = DNSResolver::resolve_ipv4(ctx.server_ip);
+        if (addresses.empty())
+        {
+            Logger::error("[RTSP] Failed to resolve host in URL: " + ctx.server_ip);
+            return -1;
+        }
+        ctx.server_ip = addresses.front();
     }
 
     ctx.path = (slash != std::string::npos) ? clean_url.substr(slash) : "/";
@@ -272,9 +293,17 @@ std::string rtspParser::extract_header_value(const std::string &msg, const std::
     std::transform(lower_msg.begin(), lower_msg.end(), lower_msg.begin(), [](unsigned char c) { return std::tolower(c); });
     std::transform(lower_hdr.begin(), lower_hdr.end(), lower_hdr.begin(), [](unsigned char c) { return std::tolower(c); });
 
-    size_t pos = lower_msg.find(lower_hdr + ":");
-    if (pos == std::string::npos)
-        return {};
+    const std::string needle = lower_hdr + ":";
+    size_t pos = 0;
+    while (true)
+    {
+        pos = lower_msg.find(needle, pos);
+        if (pos == std::string::npos)
+            return {};
+        if (pos == 0 || (pos >= 2 && msg[pos - 2] == '\r' && msg[pos - 1] == '\n'))
+            break;
+        pos += needle.size();
+    }
     pos += header_name.size() + 1;
     while (pos < msg.size() && (msg[pos] == ' ' || msg[pos] == '\t'))
         ++pos;

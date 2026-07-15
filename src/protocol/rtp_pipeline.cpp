@@ -40,7 +40,9 @@ bool RtpPipeline::get_payload_offset(const uint8_t *buf, size_t len, size_t &off
     size_t payload_offset = 12 + (buf[0] & 0x0F) * 4;
     if (unlikely(buf[0] & 0x10)) { // Extension
         if (unlikely(payload_offset + 4 > len)) return false;
-        uint16_t ext_len = ntohs(*reinterpret_cast<const uint16_t *>(buf + payload_offset + 2));
+        uint16_t wire_ext_len = 0;
+        memcpy(&wire_ext_len, buf + payload_offset + 2, sizeof(wire_ext_len));
+        uint16_t ext_len = ntohs(wire_ext_len);
         payload_offset += 4 + 4 * ext_len;
     }
     

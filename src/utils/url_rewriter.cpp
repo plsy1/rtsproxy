@@ -51,7 +51,15 @@ std::string URLRewriter::shiftTime(const std::string &time_str, int shift_hours)
         strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", new_timeinfo);
         return std::string(buffer);
     } else if (time_str.length() <= 10) {
-        time_t timestamp = std::stoll(time_str);
+        time_t timestamp;
+        try {
+            size_t parsed = 0;
+            long long value = std::stoll(time_str, &parsed);
+            if (parsed != time_str.size()) return time_str;
+            timestamp = static_cast<time_t>(value);
+        } catch (...) {
+            return time_str;
+        }
         timestamp += shift_hours * 3600;
         struct tm *new_timeinfo = gmtime(&timestamp);
         char buffer[16];

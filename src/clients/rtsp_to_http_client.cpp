@@ -10,6 +10,7 @@
 #include "utils/utils.h"
 #include "protocol/rtsp_parser.h"
 #include "utils/socket_helper.h"
+#include "utils/blacklist_checker.h"
 #include "core/port_pool.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -17,6 +18,11 @@
 #include <algorithm>
 #include <cstring>
 #include <sys/timerfd.h>
+
+namespace
+{
+constexpr size_t kMaxRtspMessageSize = 1024 * 1024;
+}
 
 RTSPToHttpClient::RTSPToHttpClient(EpollLoop *loop, BufferPool &pool, const sockaddr_in &client_addr, int client_fd, const rtspCtx &ctx)
     : loop_(loop),
@@ -40,6 +46,8 @@ RTSPToHttpClient::RTSPToHttpClient(EpollLoop *loop, BufferPool &pool, const sock
 
     send_http_response();
     init_rtp_rtcp_sockets();
+    if (is_closed_)
+        return;
     if (ServerConfig::isNatEnabled() && ServerConfig::getNatMethod() == "stun")
     {
         StunClient::send_stun_mapping_request(rtp_fd_);
@@ -54,6 +62,8 @@ RTSPToHttpClient::RTSPToHttpClient(EpollLoop *loop, BufferPool &pool, const sock
 void RTSPToHttpClient::set_on_closed_callback(ClosedCallback cb)
 {
     on_closed_callback_ = std::move(cb);
+    if (is_closed_ && on_closed_callback_)
+        on_closed_callback_();
 }
 
 RTSPToHttpClient::~RTSPToHttpClient()
@@ -69,15 +79,15 @@ RTSPToHttpClient::~RTSPToHttpClient()
     }
 }
 
-void RTSPToHttpClient::connect_server()
+bool RTSPToHttpClient::connect_server()
 {
     rtsp_fd_ = create_nonblocking_tcp(ctx.server_ip, ctx.server_rtsp_port, ServerConfig::getHttpUpstreamInterface());
 
     if (rtsp_fd_ < 0)
     {
         Logger::error("[RTSP] Connect to upstream failed.");
-        if (on_closed_callback_) on_closed_callback_();
-        return;
+        on_client_closed();
+        return false;
     }
 
     rtsp_ctx_ = std::make_unique<SocketCtx>(
@@ -88,6 +98,7 @@ void RTSPToHttpClient::connect_server()
     loop_->set(rtsp_ctx_.get(), rtsp_fd_, EPOLLOUT);
 
     state_ = RtspState::CONNECTING;
+    return true;
 }
 
 void RTSPToHttpClient::handle_rtsp(uint32_t event)
@@ -99,6 +110,11 @@ void RTSPToHttpClient::handle_rtsp(uint32_t event)
     if (event & EPOLLOUT)
     {
         on_rtsp_writable();
+    }
+    if ((event & (EPOLLHUP | EPOLLRDHUP | EPOLLERR)) &&
+        !(event & EPOLLIN))
+    {
+        on_client_closed();
     }
 }
 
@@ -148,7 +164,9 @@ void RTSPToHttpClient::handle_timer(uint32_t event)
     if (event & EPOLLIN)
     {
         uint64_t expirations;
-        read(timer_fd_, &expirations, sizeof(expirations));
+        if (read(timer_fd_, &expirations, sizeof(expirations)) !=
+            static_cast<ssize_t>(sizeof(expirations)))
+            return;
         push_request_into_queue(RtspMethod::GET_PARAMETER, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path);
         build_and_send_request();
 
@@ -168,7 +186,7 @@ void RTSPToHttpClient::on_rtsp_writable()
         if (getsockopt(rtsp_fd_, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0)
         {
             Logger::error("[RTSP] Connect to upstream failed.");
-            on_closed_callback_();
+            on_client_closed();
             return;
         }
         Logger::debug("[RTSP] Connection to upstream established.");
@@ -194,11 +212,15 @@ void RTSPToHttpClient::on_rtsp_writable()
             tcp_send_offset_ = 0;
         }
     }
+    else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+    {
+        return;
+    }
     else
     {
         Logger::error("[RTSP] RTSP control message send failed.");
 
-        on_closed_callback_();
+        on_client_closed();
         return;
     }
 }
@@ -211,13 +233,21 @@ void RTSPToHttpClient::on_rtsp_readable()
         if (n > 0)
         {
             resp_buf_.append(rtsp_buf, n);
+            if (resp_buf_.size() > kMaxRtspMessageSize)
+            {
+                Logger::error("[RTSP] Upstream message exceeds 1 MiB limit");
+                on_client_closed();
+                return;
+            }
             while (!resp_buf_.empty())
             {
                 if (resp_buf_[0] == '$')
                 {
                     if (resp_buf_.size() < 4)
                         break;
-                    uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(resp_buf_.data() + 2));
+                    uint16_t wire_len = 0;
+                    memcpy(&wire_len, resp_buf_.data() + 2, sizeof(wire_len));
+                    uint16_t len = ntohs(wire_len);
                     if (resp_buf_.size() < static_cast<size_t>(len) + 4)
                         break;
 
@@ -235,11 +265,19 @@ void RTSPToHttpClient::on_rtsp_readable()
 
                 std::string header = resp_buf_.substr(0, end + 4);
                 int content_length = rtspParser::get_content_length(header);
-                if (resp_buf_.size() < end + 4 + content_length)
+                if (content_length < 0 ||
+                    static_cast<size_t>(content_length) > kMaxRtspMessageSize - (end + 4))
+                {
+                    Logger::error("[RTSP] Invalid or oversized Content-Length");
+                    on_client_closed();
+                    return;
+                }
+                size_t message_size = end + 4 + static_cast<size_t>(content_length);
+                if (resp_buf_.size() < message_size)
                     break;
 
                 std::string body = resp_buf_.substr(end + 4, content_length);
-                resp_buf_.erase(0, end + 4 + content_length);
+                resp_buf_.erase(0, message_size);
 
                 rtspParser::parse_session_id(header, ctx);
                 int status = rtspParser::parse_status_code(header);
@@ -251,10 +289,12 @@ void RTSPToHttpClient::on_rtsp_readable()
                     {
                         Logger::debug("[RTSP] Received request from server, responding with 200 OK (CSeq: " + cseq + ")");
                         std::string resp = "RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\n\r\n";
-                        send(rtsp_fd_, resp.data(), resp.size(), 0);
+                        send(rtsp_fd_, resp.data(), resp.size(), MSG_NOSIGNAL);
                         continue;
                     }
                 }
+
+                request_in_flight_ = false;
 
                 if (status == 461 && current_request_.method == RtspMethod::SETUP && !setup_retry_with_tcp_)
                 {
@@ -270,14 +310,14 @@ void RTSPToHttpClient::on_rtsp_readable()
                     if (location.empty())
                     {
                         Logger::error("[RTSP] Redirect status " + std::to_string(status) + " received but Location header is missing.");
-                        on_closed_callback_();
+                        on_client_closed();
                         return;
                     }
 
                     if (++redirect_count_ > 3)
                     {
                         Logger::error("[RTSP] Too many redirects (limit 3 exceeded).");
-                        on_closed_callback_();
+                        on_client_closed();
                         return;
                     }
 
@@ -287,7 +327,17 @@ void RTSPToHttpClient::on_rtsp_readable()
                     if (rtspParser::parse_url(location, temp_ctx) != 0)
                     {
                         Logger::error("[RTSP] Failed to parse redirect Location URL: " + location);
-                        on_closed_callback_();
+                        on_client_closed();
+                        return;
+                    }
+
+                    if (BlacklistChecker::is_blacklisted(temp_ctx.server_ip) ||
+                        BlacklistChecker::is_loopback(temp_ctx.server_ip,
+                                                      temp_ctx.server_rtsp_port,
+                                                      client_fd_))
+                    {
+                        Logger::error("[RTSP] Redirect target is blocked: " + location);
+                        on_client_closed();
                         return;
                     }
 
@@ -311,6 +361,7 @@ void RTSPToHttpClient::on_rtsp_readable()
 
                     tcp_send_offset_ = 0;
                     resp_buf_.clear();
+                    request_in_flight_ = true;
 
                     rtsp_ctx_.reset();
                     rtsp_fd_ = -1;
@@ -322,7 +373,7 @@ void RTSPToHttpClient::on_rtsp_readable()
                 if (status != 200)
                 {
                     Logger::error("[RTSP] Connection to upstream refused. Status: " + std::to_string(status) + ", Header: " + header);
-                    on_closed_callback_();
+                    on_client_closed();
                     return;
                 }
 
@@ -340,7 +391,7 @@ void RTSPToHttpClient::on_rtsp_readable()
                     if (rtspParser::parse_server_ports(header, ctx) != 0)
                     {
                         Logger::error("Can't parser server port");
-                        on_closed_callback_();
+                        on_client_closed();
                         return;
                     }
 
@@ -383,7 +434,7 @@ void RTSPToHttpClient::on_rtsp_readable()
         else if (n == 0)
         {
             Logger::debug("[RTSP] Server closed connection");
-            on_closed_callback_();
+            on_client_closed();
             return;
         }
         else if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -393,7 +444,7 @@ void RTSPToHttpClient::on_rtsp_readable()
         else
         {
             Logger::warn("[RTSP] Receive failed");
-            on_closed_callback_();
+            on_client_closed();
             return;
         }
     }
@@ -506,7 +557,8 @@ void RTSPToHttpClient::on_client_writable()
     while (!send_queue_.empty())
     {
         auto &packet = send_queue_.front();
-        ssize_t n = send(client_fd_, packet.data.get() + packet.offset, packet.length - packet.offset, 0);
+        ssize_t n = send(client_fd_, packet.data.get() + packet.offset,
+                         packet.length - packet.offset, MSG_NOSIGNAL);
         if (n < 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -518,7 +570,13 @@ void RTSPToHttpClient::on_client_writable()
             }
         }
 
-        Statistics::getInstance().addDownstreamBytes(n);
+        if (n == 0)
+        {
+            on_client_closed();
+            return;
+        }
+
+        Statistics::getInstance().addDownstreamBytes(static_cast<size_t>(n));
         downstream_est_.addBytes(n);
         packet.offset += n;
 
@@ -557,7 +615,7 @@ void RTSPToHttpClient::push_request_into_queue(RtspMethod method, const std::str
 
 void RTSPToHttpClient::build_and_send_request()
 {
-    if (!request_queue_.empty())
+    if (!request_in_flight_ && !request_queue_.empty() && rtsp_fd_ >= 0 && rtsp_ctx_)
     {
         current_request_ = request_queue_.front();
         request_queue_.pop();
@@ -574,6 +632,7 @@ void RTSPToHttpClient::build_and_send_request()
             req_buf_ += "\r\n";
 
         tcp_send_offset_ = 0;
+        request_in_flight_ = true;
         loop_->set(rtsp_ctx_.get(), rtsp_fd_, EPOLLOUT);
     }
 }
@@ -583,7 +642,7 @@ void RTSPToHttpClient::init_rtp_rtcp_sockets()
     if (bind_udp_pair_from_pool(rtp_fd_.get_ref(), rtcp_fd_.get_ref(), rtp_port_, ServerConfig::getHttpUpstreamInterface()) < 0)
     {
         Logger::error("[RTP] Failed to bind RTP/RTCP sockets from pool");
-        if (on_closed_callback_) on_closed_callback_();
+        on_client_closed();
         return;
     }
 
@@ -663,15 +722,25 @@ void RTSPToHttpClient::init_timer_fd()
 {
     using namespace std::chrono;
 
-    // Use FdGuard to ensure old FD is removed from epoll and closed
-    timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    int new_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (new_timer_fd < 0)
+    {
+        Logger::warn("[RTSP] Failed to create keepalive timer");
+        return;
+    }
+    timer_fd_ = new_timer_fd;
     itimerspec its{};
     auto interval = seconds(20);
 
     its.it_value.tv_sec = interval.count();
     its.it_interval.tv_sec = interval.count();
 
-    timerfd_settime(timer_fd_, 0, &its, nullptr);
+    if (timerfd_settime(timer_fd_, 0, &its, nullptr) < 0)
+    {
+        Logger::warn("[RTSP] Failed to arm keepalive timer");
+        timer_fd_ = -1;
+        return;
+    }
 
     // Defer deletion of old context if it exists
     if (timer_ctx_)
@@ -689,8 +758,6 @@ void RTSPToHttpClient::init_timer_fd()
 
 void RTSPToHttpClient::send_http_response()
 {
-    auto buf = buffer_pool_.acquire();
-
     const char *response_header =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: video/mp2t\r\n"
@@ -698,9 +765,17 @@ void RTSPToHttpClient::send_http_response()
         "\r\n";
 
     size_t len = strlen(response_header);
-    memcpy(buf.get(), response_header, len);
-
-    send_queue_.push_back(Packet{std::move(buf), len, 0});
+    size_t offset = 0;
+    while (offset < len)
+    {
+        auto buf = buffer_pool_.acquire();
+        size_t chunk = std::min(buffer_pool_.get_buffer_size(), len - offset);
+        memcpy(buf.get(), response_header + offset, chunk);
+        send_queue_.push_back(Packet{std::move(buf), chunk, 0});
+        offset += chunk;
+    }
+    loop_->set(client_ctx_.get(), client_fd_,
+               EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT);
 }
 
 
@@ -731,7 +806,8 @@ std::string RTSPToHttpClient::RtspMethodToString(RtspMethod method)
 
 void RTSPToHttpClient::send_rtsp_option()
 {
-    connect_server();
+    if (!connect_server())
+        return;
     push_request_into_queue(RtspMethod::OPTIONS, "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path, "", "");
     build_and_send_request();
 }

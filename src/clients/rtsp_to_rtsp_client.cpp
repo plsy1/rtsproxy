@@ -10,6 +10,7 @@
 #include "protocol/rtsp_parser.h"
 #include "utils/socket_helper.h"
 #include "utils/stun_client.h"
+#include "utils/blacklist_checker.h"
 #include "core/port_pool.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -19,6 +20,36 @@
 #include <sys/timerfd.h>
 #include <chrono>
 #include <regex>
+
+namespace
+{
+constexpr size_t kMaxRtspMessageSize = 1024 * 1024;
+
+bool parse_content_length(const std::string &headers, size_t &body_len)
+{
+    body_len = 0;
+    std::string value = rtspParser::extract_header_value(headers, "Content-Length");
+    if (value.empty())
+        return true;
+
+    try
+    {
+        size_t parsed = 0;
+        unsigned long long length = std::stoull(value, &parsed);
+        while (parsed < value.size() &&
+               (value[parsed] == ' ' || value[parsed] == '\t'))
+            ++parsed;
+        if (parsed != value.size() || length > kMaxRtspMessageSize)
+            return false;
+        body_len = static_cast<size_t>(length);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+}
 
 
 /* ========================================================================= */
@@ -89,7 +120,8 @@ RTSPToRtspClient::RTSPToRtspClient(EpollLoop *loop, BufferPool &pool,
     loop_->set(downstream_ctx_.get(), client_fd,
                EPOLLRDHUP | EPOLLHUP | EPOLLERR);
 
-    connect_upstream();
+    if (!connect_upstream())
+        close_all();
 }
 
 RTSPToRtspClient::~RTSPToRtspClient()
@@ -112,20 +144,23 @@ RTSPToRtspClient::~RTSPToRtspClient()
 void RTSPToRtspClient::set_on_closed_callback(ClosedCallback cb)
 {
     on_closed_ = std::move(cb);
+    if (closed_ && on_closed_)
+        on_closed_();
 }
 
 /* ========================================================================= */
 /* Connect to upstream                                                        */
 /* ========================================================================= */
 
-void RTSPToRtspClient::connect_upstream()
+bool RTSPToRtspClient::connect_upstream()
 {
     upstream_fd_ = create_nonblocking_tcp(ctx_.server_ip, ctx_.server_rtsp_port,
                                           ServerConfig::getMitmUpstreamInterface());
     if (upstream_fd_ < 0)
     {
-        throw std::runtime_error("Failed to connect to upstream " + ctx_.server_ip +
-                                ":" + std::to_string(ctx_.server_rtsp_port));
+        Logger::error("[MITM] Failed to connect to upstream " + ctx_.server_ip +
+                      ":" + std::to_string(ctx_.server_rtsp_port));
+        return false;
     }
 
     upstream_ctx_ = std::make_unique<SocketCtx>(
@@ -135,6 +170,7 @@ void RTSPToRtspClient::connect_upstream()
     // EPOLLOUT fires when non-blocking connect completes.
     loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLOUT);
     state_ = State::WAIT_UPSTREAM_CONNECT;
+    return true;
 }
 
 /* ========================================================================= */
@@ -154,9 +190,21 @@ bool RTSPToRtspClient::extract_client_port(const std::string &req,
     if (!std::regex_search(transport, m, re))
         return false;
 
-    rtp_port = static_cast<uint16_t>(std::stoi(m[1]));
-    rtcp_port = static_cast<uint16_t>(std::stoi(m[2]));
-    return true;
+    try
+    {
+        int parsed_rtp = std::stoi(m[1]);
+        int parsed_rtcp = std::stoi(m[2]);
+        if (parsed_rtp < 1 || parsed_rtp > 65535 ||
+            parsed_rtcp < 1 || parsed_rtcp > 65535)
+            return false;
+        rtp_port = static_cast<uint16_t>(parsed_rtp);
+        rtcp_port = static_cast<uint16_t>(parsed_rtcp);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 bool RTSPToRtspClient::extract_interleaved_channels(const std::string &req,
@@ -172,9 +220,21 @@ bool RTSPToRtspClient::extract_interleaved_channels(const std::string &req,
     if (!std::regex_search(transport, m, re))
         return false;
 
-    rtp_chan = static_cast<uint8_t>(std::stoi(m[1]));
-    rtcp_chan = static_cast<uint8_t>(std::stoi(m[2]));
-    return true;
+    try
+    {
+        int parsed_rtp = std::stoi(m[1]);
+        int parsed_rtcp = std::stoi(m[2]);
+        if (parsed_rtp < 0 || parsed_rtp > 255 ||
+            parsed_rtcp < 0 || parsed_rtcp > 255)
+            return false;
+        rtp_chan = static_cast<uint8_t>(parsed_rtp);
+        rtcp_chan = static_cast<uint8_t>(parsed_rtcp);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 bool RTSPToRtspClient::init_relay_sockets()
@@ -257,12 +317,20 @@ std::string RTSPToRtspClient::patch_response_for_client(const std::string &resp)
         {
             uint16_t srv_rtp = static_cast<uint16_t>(std::stoi(sm[1]));
             uint16_t srv_rtcp = static_cast<uint16_t>(std::stoi(sm[2]));
+            std::string rtp_source = ctx_.server_ip;
+            std::regex source_re(R"(source=([0-9.]+))");
+            std::smatch source_match;
+            if (std::regex_search(transport, source_match, source_re) &&
+                !BlacklistChecker::is_blacklisted(source_match[1]))
+            {
+                rtp_source = source_match[1];
+            }
             server_rtp_addr_.sin_family = AF_INET;
             server_rtp_addr_.sin_port = htons(srv_rtp);
-            inet_pton(AF_INET, ctx_.server_ip.c_str(), &server_rtp_addr_.sin_addr);
+            inet_pton(AF_INET, rtp_source.c_str(), &server_rtp_addr_.sin_addr);
             server_rtcp_addr_.sin_family = AF_INET;
             server_rtcp_addr_.sin_port = htons(srv_rtcp);
-            inet_pton(AF_INET, ctx_.server_ip.c_str(), &server_rtcp_addr_.sin_addr);
+            inet_pton(AF_INET, rtp_source.c_str(), &server_rtcp_addr_.sin_addr);
             
             if (!is_upstream_tcp_)
             {
@@ -507,12 +575,23 @@ std::string RTSPToRtspClient::rewrite_request_for_upstream(const std::string &re
 void RTSPToRtspClient::init_timer_fd()
 {
     using namespace std::chrono;
-    timer_fd_ = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    int new_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (new_timer_fd < 0)
+    {
+        Logger::warn("[MITM] Failed to create keepalive timer");
+        return;
+    }
+    timer_fd_ = new_timer_fd;
     itimerspec its{};
     auto interval = seconds(20);
     its.it_value.tv_sec = interval.count();
     its.it_interval.tv_sec = interval.count();
-    timerfd_settime(timer_fd_, 0, &its, nullptr);
+    if (timerfd_settime(timer_fd_, 0, &its, nullptr) < 0)
+    {
+        Logger::warn("[MITM] Failed to arm keepalive timer");
+        timer_fd_ = -1;
+        return;
+    }
 
     if (timer_ctx_)
     {
@@ -549,10 +628,13 @@ void RTSPToRtspClient::handle_upstream(uint32_t events)
         on_upstream_writable();
     if (events & EPOLLIN)
         on_upstream_readable();
-    if (events & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
+    // When EPOLLIN and HUP arrive together, data is still waiting in the
+    // socket. Drain it on subsequent level-triggered EPOLLIN events first.
+    if ((events & (EPOLLHUP | EPOLLRDHUP | EPOLLERR)) &&
+        !(events & EPOLLIN))
     {
         Logger::debug("[MITM] Upstream connection closed");
-        close_all();
+        finish_upstream_connection();
     }
 }
 
@@ -599,9 +681,9 @@ void RTSPToRtspClient::handle_rtp_from_upstream(uint32_t /*events*/)
             break;
         }
 
-        // Packet from upstream server -> send to downstream client
-        // if (src.sin_port == server_rtp_addr_.sin_port &&
-        //     src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
+        // Ignore datagrams that did not come from the negotiated RTP endpoint.
+        if (src.sin_port == server_rtp_addr_.sin_port &&
+            src.sin_addr.s_addr == server_rtp_addr_.sin_addr.s_addr)
         {
             upstream_est_.addBytes(n);
             Statistics::getInstance().addUpstreamBytes(n);
@@ -645,9 +727,8 @@ void RTSPToRtspClient::handle_rtcp_from_upstream(uint32_t /*events*/)
             break;
         }
 
-        // Packet from upstream server -> send to downstream client
-        // if (src.sin_port == server_rtcp_addr_.sin_port &&
-        //     src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
+        if (src.sin_port == server_rtcp_addr_.sin_port &&
+            src.sin_addr.s_addr == server_rtcp_addr_.sin_addr.s_addr)
         {
             upstream_est_.addBytes(n);
             Statistics::getInstance().addUpstreamBytes(n);
@@ -672,6 +753,12 @@ void RTSPToRtspClient::send_interleaved_downstream(uint8_t channel, const uint8_
     if (closed_ || downstream_fd_ < 0) return;
 
     size_t pool_block_size = pool_.get_buffer_size();
+    if (pool_block_size <= 4)
+    {
+        Logger::error("[MITM] Buffer pool block is too small for interleaved RTP");
+        close_all();
+        return;
+    }
     if (len + 4 > pool_block_size) {
         Logger::warn("[MITM] Packet too large, truncated (" + std::to_string(len + 4) + " > " + std::to_string(pool_block_size) + ")");
         len = pool_block_size - 4;
@@ -830,12 +917,19 @@ void RTSPToRtspClient::handle_rtcp_from_client(uint32_t /*events*/)
 void RTSPToRtspClient::handle_timer(uint32_t /*events*/)
 {
     uint64_t exp;
-    read(timer_fd_, &exp, sizeof(exp));
+    if (read(timer_fd_, &exp, sizeof(exp)) !=
+        static_cast<ssize_t>(sizeof(exp)))
+        return;
+    if (keepalive_pending_ || upstream_fd_ < 0)
+        return;
+
+    uint32_t cseq = keepalive_cseq_++;
     // Send a GET_PARAMETER to upstream as keepalive.
     std::string ka = "GET_PARAMETER " + ctx_.rtsp_url + " RTSP/1.0\r\n"
-                     "CSeq: 99\r\n"
+                     "CSeq: " + std::to_string(cseq) + "\r\n"
                      "Session: " + ctx_.session_id + "\r\n"
                      "\r\n";
+    keepalive_pending_ = true;
     to_upstream_q_.push_back(ka);
     loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
 
@@ -861,6 +955,12 @@ void RTSPToRtspClient::on_downstream_readable()
     }
     buf[n] = 0;
     downstream_recv_buf_.append(buf, n);
+    if (downstream_recv_buf_.size() > kMaxRtspMessageSize)
+    {
+        Logger::warn("[MITM] Downstream RTSP message exceeds 1 MiB limit");
+        close_all();
+        return;
+    }
 
     // Wait for a complete RTSP message (ends with \r\n\r\n) or Interleaved packet ($)
     while (!downstream_recv_buf_.empty())
@@ -870,7 +970,9 @@ void RTSPToRtspClient::on_downstream_readable()
             if (downstream_recv_buf_.size() < 4)
                 break;
             
-            uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(downstream_recv_buf_.data() + 2));
+            uint16_t wire_len = 0;
+            memcpy(&wire_len, downstream_recv_buf_.data() + 2, sizeof(wire_len));
+            uint16_t len = ntohs(wire_len);
             if (downstream_recv_buf_.size() < static_cast<size_t>(len) + 4)
                 break;
 
@@ -884,9 +986,20 @@ void RTSPToRtspClient::on_downstream_readable()
         if (end == std::string::npos)
             break;
 
-        // Include the trailing \r\n\r\n
-        std::string req = downstream_recv_buf_.substr(0, end + 4);
-        downstream_recv_buf_ = downstream_recv_buf_.substr(end + 4);
+        size_t body_len = 0;
+        if (!parse_content_length(downstream_recv_buf_.substr(0, end + 4), body_len) ||
+            body_len > kMaxRtspMessageSize - (end + 4))
+        {
+            Logger::warn("[MITM] Invalid downstream Content-Length");
+            close_all();
+            return;
+        }
+        size_t total = end + 4 + body_len;
+        if (downstream_recv_buf_.size() < total)
+            break;
+
+        std::string req = downstream_recv_buf_.substr(0, total);
+        downstream_recv_buf_.erase(0, total);
 
         last_downstream_req_ = req;
 
@@ -970,7 +1083,7 @@ void RTSPToRtspClient::on_downstream_writable()
         auto &packet = to_downstream_q_.front();
         ssize_t n = send(downstream_fd_,
                          packet.data.get() + packet.offset,
-                         packet.length - packet.offset, 0);
+                         packet.length - packet.offset, MSG_NOSIGNAL);
         if (n > 0)
         {
             Statistics::getInstance().addDownstreamBytes(n);
@@ -995,6 +1108,11 @@ void RTSPToRtspClient::on_downstream_writable()
     // Once the queue is empty, go back to only waiting for incoming data.
     if (to_downstream_q_.empty())
     {
+        if (close_after_downstream_flush_)
+        {
+            close_all();
+            return;
+        }
         loop_->set(downstream_ctx_.get(), downstream_fd_,
                    EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN);
     }
@@ -1053,7 +1171,7 @@ void RTSPToRtspClient::on_upstream_writable()
         auto &msg = to_upstream_q_.front();
         ssize_t n = send(upstream_fd_,
                          msg.data() + upstream_send_offset_,
-                         msg.size() - upstream_send_offset_, 0);
+                         msg.size() - upstream_send_offset_, MSG_NOSIGNAL);
         if (n > 0)
         {
             upstream_send_offset_ += n;
@@ -1092,12 +1210,18 @@ void RTSPToRtspClient::on_upstream_readable()
         if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
         {
             Logger::debug("[MITM] Upstream closed connection");
-            close_all();
+            finish_upstream_connection();
         }
         return;
     }
     buf[n] = 0;
     upstream_recv_buf_.append(buf, n);
+    if (upstream_recv_buf_.size() > kMaxRtspMessageSize)
+    {
+        Logger::warn("[MITM] Upstream RTSP message exceeds 1 MiB limit");
+        close_all();
+        return;
+    }
 
     // Forward complete RTSP responses or handle Interleaved packets
     while (!upstream_recv_buf_.empty())
@@ -1107,7 +1231,9 @@ void RTSPToRtspClient::on_upstream_readable()
             if (upstream_recv_buf_.size() < 4)
                 break;
             
-            uint16_t len = ntohs(*reinterpret_cast<const uint16_t *>(upstream_recv_buf_.data() + 2));
+            uint16_t wire_len = 0;
+            memcpy(&wire_len, upstream_recv_buf_.data() + 2, sizeof(wire_len));
+            uint16_t len = ntohs(wire_len);
             if (upstream_recv_buf_.size() < static_cast<size_t>(len) + 4)
                 break;
 
@@ -1123,11 +1249,12 @@ void RTSPToRtspClient::on_upstream_readable()
 
         // A response may have a body (SDP). Read Content-Length.
         size_t body_len = 0;
-        std::string cl_val = rtspParser::extract_header_value(
-            upstream_recv_buf_.substr(0, end + 4), "Content-Length");
-        if (!cl_val.empty())
+        if (!parse_content_length(upstream_recv_buf_.substr(0, end + 4), body_len) ||
+            body_len > kMaxRtspMessageSize - (end + 4))
         {
-            try { body_len = std::stoul(cl_val); } catch (...) {}
+            Logger::warn("[MITM] Invalid upstream Content-Length");
+            close_all();
+            return;
         }
 
         size_t total = end + 4 + body_len;
@@ -1137,9 +1264,15 @@ void RTSPToRtspClient::on_upstream_readable()
         std::string resp = upstream_recv_buf_.substr(0, total);
         upstream_recv_buf_ = upstream_recv_buf_.substr(total);
 
-        // Check if this is a response to our injected keepalive (CSeq: 99).
-        if (resp.find("CSeq: 99\r\n") != std::string::npos)
+        // Consume only the response to the currently pending injected
+        // keepalive; do not swallow a downstream request that happens to use
+        // the same fixed CSeq.
+        std::string response_cseq = rtspParser::extract_header_value(resp, "CSeq");
+        uint32_t expected_keepalive_cseq = keepalive_cseq_ - 1;
+        if (keepalive_pending_ &&
+            response_cseq == std::to_string(expected_keepalive_cseq))
         {
+            keepalive_pending_ = false;
             Logger::debug("[MITM] Consumed keepalive response from upstream");
             continue;
         }
@@ -1176,6 +1309,16 @@ void RTSPToRtspClient::on_upstream_readable()
                 return;
             }
 
+            if (BlacklistChecker::is_blacklisted(temp_ctx.server_ip) ||
+                BlacklistChecker::is_loopback(temp_ctx.server_ip,
+                                              temp_ctx.server_rtsp_port,
+                                              downstream_fd_))
+            {
+                Logger::error("[MITM] Redirect target is blocked: " + location);
+                close_all();
+                return;
+            }
+
             // Update ctx_ with the new location info
             ctx_.server_ip = temp_ctx.server_ip;
             ctx_.server_rtsp_port = temp_ctx.server_rtsp_port;
@@ -1199,7 +1342,8 @@ void RTSPToRtspClient::on_upstream_readable()
             to_upstream_q_.push_back(rewritten_req);
 
             // Connect to the new upstream server
-            connect_upstream();
+            if (!connect_upstream())
+                close_all();
             return;
         }
 
@@ -1253,13 +1397,41 @@ void RTSPToRtspClient::on_upstream_readable()
             }
         }
 
-        // Convert RTSP response string to Packet
-        auto buf = pool_.acquire();
-        memcpy(buf.get(), resp.data(), resp.size());
-        to_downstream_q_.push_back(Packet{std::move(buf), resp.size(), 0});
+        // A control response (especially SDP) can be much larger than one
+        // fixed-size RTP pool block. Queue it in safe chunks.
+        size_t response_offset = 0;
+        while (response_offset < resp.size())
+        {
+            auto response_buf = pool_.acquire();
+            size_t chunk = std::min(pool_.get_buffer_size(),
+                                    resp.size() - response_offset);
+            memcpy(response_buf.get(), resp.data() + response_offset, chunk);
+            to_downstream_q_.push_back(
+                Packet{std::move(response_buf), chunk, 0});
+            response_offset += chunk;
+        }
         loop_->set(downstream_ctx_.get(), downstream_fd_,
                    EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLOUT | EPOLLIN);
     }
+}
+
+void RTSPToRtspClient::finish_upstream_connection()
+{
+    if (closed_ || close_after_downstream_flush_)
+        return;
+
+    if (upstream_fd_ >= 0)
+        upstream_fd_ = -1;
+
+    if (to_downstream_q_.empty())
+    {
+        close_all();
+        return;
+    }
+
+    close_after_downstream_flush_ = true;
+    loop_->set(downstream_ctx_.get(), downstream_fd_,
+               EPOLLRDHUP | EPOLLHUP | EPOLLERR | EPOLLIN | EPOLLOUT);
 }
 
 /* ========================================================================= */

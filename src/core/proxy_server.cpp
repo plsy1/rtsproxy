@@ -43,7 +43,15 @@ ProxyServer::~ProxyServer() {}
 int ProxyServer::run(int argc, char *argv[])
 {
     // 1. Parse command line and load config
-    ServerConfig::parseCommandLine(argc, argv);
+    try
+    {
+        ServerConfig::parseCommandLine(argc, argv);
+    }
+    catch (const std::exception &e)
+    {
+        Logger::error("[CONFIG] Invalid configuration: " + std::string(e.what()));
+        return EXIT_FAILURE;
+    }
     
     if (!ServerConfig::getLogFile().empty()) {
         Logger::setLogFile(ServerConfig::getLogFile(), ServerConfig::getLogLines());
@@ -141,6 +149,7 @@ void ProxyServer::setup_signals()
 {
     signal(SIGINT, worker_sig_handler);
     signal(SIGTERM, worker_sig_handler);
+    signal(SIGPIPE, SIG_IGN);
     
     if (ServerConfig::isWatchdogEnabled()) {
         signal(SIGSEGV, crash_handler);
@@ -171,14 +180,16 @@ void ProxyServer::setup_accept_handler(int listen_fd, EpollLoop &loop, BufferPoo
             set_tcp_nodelay(client_fd);
 
             auto ctx = std::make_unique<SocketCtx>();
+            auto request_buffer = std::make_shared<std::string>();
             ctx->fd = client_fd;
-            ctx->handler = [client_fd, client_addr, &loop, &pool](uint32_t e)
+            ctx->handler = [client_fd, client_addr, &loop, &pool, request_buffer](uint32_t e)
             {
-                [[maybe_unused]] uint32_t unused_events = e;
-                MasterHandle::handle(client_fd, client_addr, &loop, pool);
+                MasterHandle::handle(client_fd, client_addr, &loop, pool,
+                                     *request_buffer, e);
             };
 
-            loop.set(std::move(ctx), client_fd, EPOLLIN);
+            loop.set(std::move(ctx), client_fd,
+                     EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR);
         }
     };
 
