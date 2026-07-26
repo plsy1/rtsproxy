@@ -17,18 +17,22 @@ std::string URLRewriter::simplifyToRegex(const std::string &match_pattern)
 {
     std::string regex_pattern = match_pattern;
     size_t pos = 0;
+    // Each erase length must equal the placeholder's own length and each
+    // advance must equal the replacement's length (5), otherwise the character
+    // after the placeholder is swallowed and an immediately adjacent
+    // placeholder is skipped.
     while ((pos = regex_pattern.find("{number}", pos)) != std::string::npos) {
         regex_pattern.replace(pos, 8, "(\\d+)");
-        pos += 6;
+        pos += 5;
     }
     pos = 0;
     while ((pos = regex_pattern.find("{word}", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 7, "(\\w+)");
-        pos += 6;
+        regex_pattern.replace(pos, 6, "(\\w+)");
+        pos += 5;
     }
     pos = 0;
     while ((pos = regex_pattern.find("{any}", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 6, "(.*?)");
+        regex_pattern.replace(pos, 5, "(.*?)");
         pos += 5;
     }
     pos = 0;

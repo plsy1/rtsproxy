@@ -2,6 +2,7 @@
 #include "core/server_config.h"
 #include "utils/url_rewriter.h"
 #include <cstdio>
+#include <sstream>
 
 static std::string sanitize_input(const std::string &s)
 {
