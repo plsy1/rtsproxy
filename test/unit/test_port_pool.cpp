@@ -1,0 +1,311 @@
+// Unit tests for PortPool (src/core/port_pool.cpp).
+//
+// PortPool is a process-wide singleton with a hard-coded range of
+// [start_port_ = 20000, end_port_ = 40000) and no reset entry point, so these
+// tests are written to be *self-cleaning*: every group releases everything it
+// acquired (including ports it marked occupied) before the next group runs.
+// The allocation cursor (next_port_) keeps moving forward regardless, so no
+// group asserts an absolute port number -- everything is expressed relative to
+// the first port that group acquired. The one exception is the final
+// exhaustion group, which deliberately drains the whole pool and therefore
+// runs last.
+//
+// PortPool reads no ServerConfig state (verified by reading the source: its
+// only external dependency is Logger), so there is no global config to pin.
+
+#include "test_harness.h"
+
+#include "core/logger.h"
+#include "core/port_pool.h"
+
+#include <set>
+#include <vector>
+
+static const uint16_t kStart = 20000; // PortPool::start_port_
+static const uint16_t kEnd = 40000;   // PortPool::end_port_ (exclusive)
+static const int kTotalPairs = (kEnd - kStart) / 2;
+
+static bool in_range(uint16_t p) { return p >= kStart && p < kEnd; }
+
+// ---------------------------------------------------------------------------
+
+static void test_acquire_shape(PortPool &pool)
+{
+    SUITE("acquire_pair: shape of a single allocation");
+
+    uint16_t p = pool.acquire_pair();
+
+    CHECK(p != 0);
+    CHECK_EQ(p % 2, 0);            // RTP port must be even (RFC 3550)
+    CHECK(in_range(p));            // inside the configured range
+    CHECK(in_range((uint16_t)(p + 1))); // ...and so is its RTCP successor
+    CHECK((uint16_t)(p + 1) < kEnd);
+
+    pool.release_pair(p);
+}
+
+static void test_pairs_never_overlap(PortPool &pool)
+{
+    SUITE("acquire_pair: repeated allocations never overlap");
+
+    const int kN = 32;
+    std::vector<uint16_t> bases;
+    std::set<uint16_t> reserved; // every port implied by a handed-out pair
+
+    bool all_even = true;
+    bool all_in_range = true;
+    bool all_disjoint = true;
+    bool none_zero = true;
+
+    for (int i = 0; i < kN; ++i)
+    {
+        uint16_t p = pool.acquire_pair();
+        if (p == 0)
+        {
+            none_zero = false;
+            break;
+        }
+        if (p % 2 != 0)
+            all_even = false;
+        if (!in_range(p) || !in_range((uint16_t)(p + 1)))
+            all_in_range = false;
+        // Neither the even port nor the odd successor may already be spoken for.
+        if (!reserved.insert(p).second)
+            all_disjoint = false;
+        if (!reserved.insert((uint16_t)(p + 1)).second)
+            all_disjoint = false;
+        bases.push_back(p);
+    }
+
+    CHECK(none_zero);
+    CHECK_EQ((int)bases.size(), kN);
+    CHECK(all_even);
+    CHECK(all_in_range);
+    CHECK(all_disjoint);
+    CHECK_EQ((int)reserved.size(), 2 * kN); // 2 ports burned per pair
+
+    // The cursor walks forward in steps of two, so an unfragmented pool hands
+    // out strictly increasing, adjacent pairs.
+    bool monotonic_by_two = true;
+    for (size_t i = 1; i < bases.size(); ++i)
+        if (bases[i] != (uint16_t)(bases[i - 1] + 2))
+            monotonic_by_two = false;
+    CHECK(monotonic_by_two);
+
+    // A base is always even, so an odd port can never be handed out as an RTP
+    // port; each odd port is only ever the reserved successor of its own pair.
+    bool no_odd_base = true;
+    for (uint16_t b : bases)
+        if (b % 2 != 0)
+            no_odd_base = false;
+    CHECK(no_odd_base);
+
+    for (uint16_t b : bases)
+        pool.release_pair(b);
+}
+
+static void test_cursor_does_not_reuse_immediately(PortPool &pool)
+{
+    SUITE("round-robin cursor: a just-released pair is not handed straight back");
+
+    uint16_t a = pool.acquire_pair();
+    CHECK(a != 0);
+    pool.release_pair(a);
+
+    uint16_t b = pool.acquire_pair();
+    CHECK(b != 0);
+    CHECK(b != a);                  // not immediately recycled
+    CHECK(b != (uint16_t)(a + 1));  // and never the odd half of anything
+    CHECK_EQ(b, a + 2);             // cursor advanced past the freed pair
+    CHECK_EQ(b % 2, 0);
+
+    // Same again: releasing does not rewind the cursor.
+    pool.release_pair(b);
+    uint16_t c = pool.acquire_pair();
+    CHECK(c != a);
+    CHECK(c != b);
+    CHECK_EQ(c, a + 4);
+
+    pool.release_pair(c);
+}
+
+static void test_mark_occupied_skips(PortPool &pool)
+{
+    SUITE("mark_occupied: an externally-bound port is skipped");
+
+    uint16_t x = pool.acquire_pair(); // cursor now points at x+2
+    CHECK(x != 0);
+
+    // Block the even (RTP) half of the pair the cursor is about to return.
+    pool.mark_occupied((uint16_t)(x + 2));
+    uint16_t y = pool.acquire_pair();
+    CHECK(y != 0);
+    CHECK(y != (uint16_t)(x + 2)); // the blocked pair was skipped
+    CHECK_EQ(y, x + 4);
+    CHECK_EQ(y % 2, 0);
+
+    // Block only the odd (RTCP) half of the *next* pair: the pair must still be
+    // skipped, because a usable pair needs both ports.
+    pool.mark_occupied((uint16_t)(x + 7)); // cursor is at x+6
+    uint16_t z = pool.acquire_pair();
+    CHECK(z != 0);
+    CHECK(z != (uint16_t)(x + 6)); // (x+6, x+7) unusable: odd half taken
+    CHECK_EQ(z, x + 8);
+
+    // Marking a port that is already in use is harmless and must not corrupt
+    // the pair that owns it.
+    pool.mark_occupied(z);
+    pool.mark_occupied((uint16_t)(z + 1));
+    uint16_t w = pool.acquire_pair();
+    CHECK(w != 0);
+    CHECK(w != z);
+    CHECK_EQ(w, x + 10);
+
+    // Clean up: release the acquired pairs and clear the occupancy marks so the
+    // exhaustion group below still sees a pristine range.
+    pool.release_pair(x);
+    pool.release_pair(y);
+    pool.release_pair(z);
+    pool.release_pair(w);
+    pool.release_pair((uint16_t)(x + 2)); // clears the mark on x+2
+    pool.release_pair((uint16_t)(x + 6)); // clears the mark on x+7
+}
+
+static void test_release_edge_cases(PortPool &pool)
+{
+    SUITE("release_pair: guarded and idempotent for the simple cases");
+
+    pool.release_pair(0); // explicitly guarded no-op
+
+    uint16_t c = pool.acquire_pair();
+    CHECK(c != 0);
+    pool.release_pair(c);
+    pool.release_pair(c); // double release must not throw or corrupt the set
+
+    uint16_t d = pool.acquire_pair();
+    CHECK(d != 0);
+    CHECK_EQ(d, c + 2);
+    pool.release_pair(d);
+
+    // Releasing a pair that was never acquired is a no-op for the allocator.
+    pool.release_pair((uint16_t)(kEnd - 10));
+    uint16_t e = pool.acquire_pair();
+    CHECK(e != 0);
+    CHECK_EQ(e, d + 2);
+    pool.release_pair(e);
+}
+
+static void test_exhaustion_reuse_and_odd_release(PortPool &pool)
+{
+    SUITE("exhaustion, reuse after release, and the odd-port release bug");
+
+    // --- drain the pool -----------------------------------------------------
+    std::vector<uint16_t> bases;
+    std::set<uint16_t> seen;
+    bool all_even = true;
+    bool all_in_range = true;
+    bool all_unique = true;
+
+    for (;;)
+    {
+        uint16_t p = pool.acquire_pair();
+        if (p == 0)
+            break;
+        if (p % 2 != 0)
+            all_even = false;
+        if (!in_range(p))
+            all_in_range = false;
+        if (!seen.insert(p).second)
+            all_unique = false;
+        bases.push_back(p);
+        if ((int)bases.size() > kTotalPairs) // runaway guard
+            break;
+    }
+
+    CHECK(all_even);
+    CHECK(all_in_range);
+    CHECK(all_unique);
+    // Exactly (end - start) / 2 pairs fit, which is only true if every
+    // allocation reserves both the even port and its odd successor.
+    CHECK_EQ((int)bases.size(), kTotalPairs);
+    CHECK_EQ((int)seen.size(), kTotalPairs);
+    CHECK_EQ(*seen.begin(), kStart);
+    CHECK_EQ(*seen.rbegin(), (uint16_t)(kEnd - 2));
+
+    // The range top is respected: kEnd-1 is used only as an RTCP successor and
+    // kEnd itself is never touched.
+    CHECK(seen.find((uint16_t)(kEnd - 1)) == seen.end());
+
+    // --- exhaustion ---------------------------------------------------------
+    CHECK_EQ(pool.acquire_pair(), 0); // no pair left
+    CHECK_EQ(pool.acquire_pair(), 0); // and it stays that way
+
+    // --- release makes a pair reusable --------------------------------------
+    const uint16_t kVictim = 30000; // even, inside the range, currently held
+    pool.release_pair(kVictim);
+    uint16_t reused = pool.acquire_pair();
+    CHECK(reused != 0);
+    CHECK_EQ(reused, kVictim); // the only free pair must be handed back
+    CHECK_EQ(pool.acquire_pair(), 0);
+
+    // --- release_pair() validates neither evenness nor ownership -------------
+    // The pool is full again. Pairs (30000,30001) and (30002,30003) are both
+    // live and owned by different (hypothetical) sessions. A caller that passes
+    // the RTCP port instead of the RTP port frees one half of *each* of two
+    // different pairs.
+    pool.release_pair((uint16_t)(kVictim + 1)); // odd: erases 30001 and 30002
+
+    // Correct so far only by accident: no *complete* pair is free yet.
+    CHECK_EQ(pool.acquire_pair(), 0);
+
+    // A second caller makes the same mistake one pair along.
+    pool.release_pair((uint16_t)(kVictim + 3)); // odd: erases 30003 and 30004
+
+    // Ports 30002/30003 have now been freed by two callers, neither of which
+    // owned that pair -- its real owner has never released it.
+    uint16_t doubled = pool.acquire_pair();
+    XCHECK(doubled != (uint16_t)(kVictim + 2),
+           "release_pair() ignores evenness/ownership: an odd port frees half of "
+           "two pairs, so a live pair (30002/30003) gets handed out twice");
+    XCHECK_EQ(doubled, 0,
+              "no pair was legitimately released, so acquire_pair() should still "
+              "report exhaustion instead of double-allocating");
+
+    // Whatever came back must at least still look like a valid RTP port.
+    CHECK(doubled == 0 || doubled % 2 == 0);
+    CHECK(doubled == 0 || in_range(doubled));
+
+    // The pair whose even half was stolen (30000/30001) is now half-leaked: its
+    // even port is still marked used, so it can never be handed out again until
+    // its owner releases it properly. A correct release must restore it.
+    pool.release_pair(kVictim);
+    if (doubled != 0)
+        pool.release_pair(doubled);
+    uint16_t after = pool.acquire_pair();
+    CHECK(after != 0);
+    CHECK_EQ(after % 2, 0);
+    CHECK(in_range(after));
+
+    // Give everything back so the process ends with a clean pool.
+    if (after != 0)
+        pool.release_pair(after);
+    for (uint16_t b : bases)
+        pool.release_pair(b);
+}
+
+int main()
+{
+    // Keep the pool's exhaustion log lines out of the way where possible.
+    Logger::setLogLevel(LogLevel::ERROR);
+
+    PortPool &pool = PortPool::getInstance();
+
+    test_acquire_shape(pool);
+    test_pairs_never_overlap(pool);
+    test_cursor_does_not_reuse_immediately(pool);
+    test_mark_occupied_skips(pool);
+    test_release_edge_cases(pool);
+    test_exhaustion_reuse_and_odd_release(pool); // must run last: drains the pool
+
+    return tst::summary();
+}

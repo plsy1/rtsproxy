@@ -1,1 +1,2 @@
 option('isstatic', type: 'boolean', value: false, description: 'Enable static compilation')
+option('tests', type: 'boolean', value: false, description: 'Build the unit test suite')

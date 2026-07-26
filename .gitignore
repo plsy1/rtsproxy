@@ -50,5 +50,7 @@ bin
 openwrt-sdk-x86_64
 toolchains
 build-static-x64
+build
+builddir
 logs
 example

@@ -7,18 +7,56 @@ on:
       - 'src/**'
       - 'include/**'
       - 'openwrt/**'
+      - 'test/**'
+      - 'meson.build'
+      - 'meson_options.txt'
+      - 'install.sh'
+      - '.github/workflows/check.yml'
   pull_request:
     branches: [ "**" ]
     paths:
       - 'src/**'
       - 'include/**'
       - 'openwrt/**'
+      - 'test/**'
+      - 'meson.build'
+      - 'meson_options.txt'
+      - 'install.sh'
+      - '.github/workflows/check.yml'
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build g++
+
+      - name: Setup
+        run: meson setup builddir -Dtests=true
+
+      - name: Build
+        run: meson compile -C builddir
+
+      - name: Run tests
+        run: meson test -C builddir --print-errorlogs
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-testlog
+          path: builddir/meson-logs/testlog.txt
+
   native-build:
     name: Native Build Check
     runs-on: ubuntu-latest
