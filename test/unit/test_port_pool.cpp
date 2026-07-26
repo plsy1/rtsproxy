@@ -2,13 +2,16 @@
 //
 // PortPool is a process-wide singleton with a hard-coded range of
 // [start_port_ = 20000, end_port_ = 40000) and no reset entry point, so these
-// tests are written to be *self-cleaning*: every group releases everything it
-// acquired (including ports it marked occupied) before the next group runs.
+// tests are written to be *self-cleaning*: every group releases every pair it
+// acquired before the next group runs.
 // The allocation cursor (next_port_) keeps moving forward regardless, so no
 // group asserts an absolute port number -- everything is expressed relative to
-// the first port that group acquired. The one exception is the final
-// exhaustion group, which deliberately drains the whole pool and therefore
-// runs last.
+// the first port that group acquired. The one exception is the exhaustion
+// group, which deliberately drains the whole pool.
+//
+// mark_occupied() has no expiry and no un-mark entry point, so the group that
+// exercises it cannot clean up after itself and runs last, after the group that
+// needs an undamaged range.
 //
 // PortPool reads no ServerConfig state (verified by reading the source: its
 // only external dependency is Logger), so there is no global config to pin.
@@ -161,14 +164,13 @@ static void test_mark_occupied_skips(PortPool &pool)
     CHECK(w != z);
     CHECK_EQ(w, x + 10);
 
-    // Clean up: release the acquired pairs and clear the occupancy marks so the
-    // exhaustion group below still sees a pristine range.
+    // Clean up the acquired pairs. The occupancy marks on x+2 and x+7 cannot be
+    // cleared -- release_pair() only accepts pairs handed out by acquire_pair(),
+    // and mark_occupied() has no expiry -- which is why this group runs last.
     pool.release_pair(x);
     pool.release_pair(y);
     pool.release_pair(z);
     pool.release_pair(w);
-    pool.release_pair((uint16_t)(x + 2)); // clears the mark on x+2
-    pool.release_pair((uint16_t)(x + 6)); // clears the mark on x+7
 }
 
 static void test_release_edge_cases(PortPool &pool)
@@ -193,6 +195,22 @@ static void test_release_edge_cases(PortPool &pool)
     CHECK(e != 0);
     CHECK_EQ(e, d + 2);
     pool.release_pair(e);
+
+    // The odd (RTCP) half of a live pair is never a valid release target, and
+    // rejecting it must leave the pair's ownership intact so that its real owner
+    // can still release it afterwards.
+    uint16_t f = pool.acquire_pair();
+    CHECK(f != 0);
+    CHECK_EQ(f, e + 2);
+    pool.release_pair((uint16_t)(f + 1)); // odd: rejected
+    pool.release_pair(f);                 // still owned, so this works
+    pool.release_pair(f);                 // no longer owned: no-op
+
+    uint16_t g = pool.acquire_pair();
+    CHECK(g != 0);
+    CHECK_EQ(g, f + 2);
+    CHECK_EQ(g % 2, 0);
+    pool.release_pair(g);
 }
 
 static void test_exhaustion_reuse_and_odd_release(PortPool &pool)
@@ -248,36 +266,32 @@ static void test_exhaustion_reuse_and_odd_release(PortPool &pool)
     CHECK_EQ(reused, kVictim); // the only free pair must be handed back
     CHECK_EQ(pool.acquire_pair(), 0);
 
-    // --- release_pair() validates neither evenness nor ownership -------------
+    // --- release_pair() validates evenness and ownership ---------------------
     // The pool is full again. Pairs (30000,30001) and (30002,30003) are both
     // live and owned by different (hypothetical) sessions. A caller that passes
-    // the RTCP port instead of the RTP port frees one half of *each* of two
-    // different pairs.
-    pool.release_pair((uint16_t)(kVictim + 1)); // odd: erases 30001 and 30002
+    // the RTCP port instead of the RTP port must not free one half of *each* of
+    // two different pairs.
+    pool.release_pair((uint16_t)(kVictim + 1)); // odd: rejected
 
-    // Correct so far only by accident: no *complete* pair is free yet.
     CHECK_EQ(pool.acquire_pair(), 0);
 
     // A second caller makes the same mistake one pair along.
-    pool.release_pair((uint16_t)(kVictim + 3)); // odd: erases 30003 and 30004
+    pool.release_pair((uint16_t)(kVictim + 3)); // odd: rejected
 
-    // Ports 30002/30003 have now been freed by two callers, neither of which
-    // owned that pair -- its real owner has never released it.
+    // Neither caller owned (30002,30003), and its real owner has never released
+    // it, so it must not be handed to a second session.
     uint16_t doubled = pool.acquire_pair();
-    XCHECK(doubled != (uint16_t)(kVictim + 2),
-           "release_pair() ignores evenness/ownership: an odd port frees half of "
-           "two pairs, so a live pair (30002/30003) gets handed out twice");
-    XCHECK_EQ(doubled, 0,
-              "no pair was legitimately released, so acquire_pair() should still "
-              "report exhaustion instead of double-allocating");
+    CHECK(doubled != (uint16_t)(kVictim + 2));
+    CHECK_EQ(doubled, 0);
 
     // Whatever came back must at least still look like a valid RTP port.
     CHECK(doubled == 0 || doubled % 2 == 0);
     CHECK(doubled == 0 || in_range(doubled));
 
-    // The pair whose even half was stolen (30000/30001) is now half-leaked: its
-    // even port is still marked used, so it can never be handed out again until
-    // its owner releases it properly. A correct release must restore it.
+    // A rejected release must not half-leak the pair it was called on either:
+    // (30000,30001) is still intact, so its owner gets the whole pair back.
+    pool.release_pair(kVictim);
+    CHECK_EQ(pool.acquire_pair(), kVictim);
     pool.release_pair(kVictim);
     if (doubled != 0)
         pool.release_pair(doubled);
@@ -303,9 +317,9 @@ int main()
     test_acquire_shape(pool);
     test_pairs_never_overlap(pool);
     test_cursor_does_not_reuse_immediately(pool);
-    test_mark_occupied_skips(pool);
     test_release_edge_cases(pool);
-    test_exhaustion_reuse_and_odd_release(pool); // must run last: drains the pool
+    test_exhaustion_reuse_and_odd_release(pool); // drains the pool, then restores it
+    test_mark_occupied_skips(pool); // must run last: its marks are permanent
 
     return tst::summary();
 }

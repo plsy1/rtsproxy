@@ -96,14 +96,17 @@ void rtspParser::SDP::parseMedia(const std::string &line, rtspCtx &ctx)
 
 void rtspParser::SDP::parseAttribute(const std::string &line, Media &media)
 {
-    std::istringstream attr_stream(line.substr(2));
-    std::string key, value;
-    if (std::getline(attr_stream, key, ':') && std::getline(attr_stream, value))
-    {
-        media.attributes[key] = value;
-        if (key == "control")
-            media.trackID = value;
-    }
+    // RFC 4566 allows both "a=<key>:<value>" and the bare property form "a=<key>"
+    std::string attribute = line.substr(2);
+    size_t colon = attribute.find(':');
+    std::string key = attribute.substr(0, colon);
+    std::string value = (colon == std::string::npos) ? std::string() : attribute.substr(colon + 1);
+    if (key.empty())
+        return;
+
+    media.attributes[key] = value;
+    if (key == "control")
+        media.trackID = value;
 }
 
 void rtspParser::SDP::parseBandwidth(const std::string &line, rtspCtx &ctx)
@@ -118,6 +121,32 @@ void rtspParser::SDP::parseBandwidth(const std::string &line, rtspCtx &ctx)
     }
 }
 
+namespace
+{
+
+// A single Transport range endpoint: a decimal number, optionally padded with
+// horizontal whitespace as some servers do.
+bool parse_transport_number(const std::string &text, int &value)
+{
+    try
+    {
+        size_t parsed = 0;
+        int number = std::stoi(text, &parsed);
+        while (parsed < text.size() && (text[parsed] == ' ' || text[parsed] == '\t'))
+            ++parsed;
+        if (parsed != text.size())
+            return false;
+        value = number;
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+} // namespace
+
 int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
 {
     std::string transport_ = extract_header_value(resp, "Transport");
@@ -128,52 +157,51 @@ int rtspParser::parse_server_ports(const std::string &resp, rtspCtx &ctx)
     if (sp_pos != std::string::npos)
     {
         sp_pos += strlen("server_port=");
+        // the range must be read from this parameter only, never from a later one
+        size_t sp_end = transport_.find(';', sp_pos);
+        if (sp_end == std::string::npos)
+            sp_end = transport_.size();
         size_t dash = transport_.find('-', sp_pos);
-        if (dash != std::string::npos)
-        {
-            try
-            {
-                int rtp_port = std::stoi(transport_.substr(sp_pos, dash - sp_pos));
-                int rtcp_port = std::stoi(transport_.substr(dash + 1));
-                if (rtp_port < 1 || rtp_port > 65535 ||
-                    rtcp_port < 1 || rtcp_port > 65535)
-                    return -1;
-                ctx.server_rtp_port = static_cast<uint16_t>(rtp_port);
-                ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_port);
-                return 0;
-            }
-            catch (...)
-            {
-                return -1;
-            }
-        }
+        if (dash == std::string::npos || dash >= sp_end)
+            return -1;
+
+        int rtp_port = 0;
+        int rtcp_port = 0;
+        if (!parse_transport_number(transport_.substr(sp_pos, dash - sp_pos), rtp_port) ||
+            !parse_transport_number(transport_.substr(dash + 1, sp_end - dash - 1), rtcp_port))
+            return -1;
+        if (rtp_port < 1 || rtp_port > 65535 ||
+            rtcp_port < 1 || rtcp_port > 65535)
+            return -1;
+        ctx.server_rtp_port = static_cast<uint16_t>(rtp_port);
+        ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_port);
+        return 0;
     }
 
     size_t int_pos = transport_.find("interleaved=");
     if (int_pos != std::string::npos)
     {
         int_pos += strlen("interleaved=");
+        size_t int_end = transport_.find(';', int_pos);
+        if (int_end == std::string::npos)
+            int_end = transport_.size();
         size_t dash = transport_.find('-', int_pos);
-        if (dash != std::string::npos)
-        {
-            // For interleaved mode, we can store channels in port fields
-            // The caller (RTSPToHttpClient) will check for "interleaved" in the string anyway
-            try
-            {
-                int rtp_channel = std::stoi(transport_.substr(int_pos, dash - int_pos));
-                int rtcp_channel = std::stoi(transport_.substr(dash + 1));
-                if (rtp_channel < 0 || rtp_channel > 255 ||
-                    rtcp_channel < 0 || rtcp_channel > 255)
-                    return -1;
-                ctx.server_rtp_port = static_cast<uint16_t>(rtp_channel);
-                ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_channel);
-                return 0;
-            }
-            catch (...)
-            {
-                return -1;
-            }
-        }
+        if (dash == std::string::npos || dash >= int_end)
+            return -1;
+
+        // For interleaved mode, we can store channels in port fields
+        // The caller (RTSPToHttpClient) will check for "interleaved" in the string anyway
+        int rtp_channel = 0;
+        int rtcp_channel = 0;
+        if (!parse_transport_number(transport_.substr(int_pos, dash - int_pos), rtp_channel) ||
+            !parse_transport_number(transport_.substr(dash + 1, int_end - dash - 1), rtcp_channel))
+            return -1;
+        if (rtp_channel < 0 || rtp_channel > 255 ||
+            rtcp_channel < 0 || rtcp_channel > 255)
+            return -1;
+        ctx.server_rtp_port = static_cast<uint16_t>(rtp_channel);
+        ctx.server_rtcp_port = static_cast<uint16_t>(rtcp_channel);
+        return 0;
     }
 
     return -1;

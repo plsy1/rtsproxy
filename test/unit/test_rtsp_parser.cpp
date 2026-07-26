@@ -328,13 +328,12 @@ void test_parse_server_ports()
              0);
     CHECK_EQ(both.server_rtp_port, 6970);
 
-    SUITE("parse_server_ports / dash scanned across whole Transport value");
+    SUITE("parse_server_ports / dash is bounded to its own parameter");
 
-    // The '-' that separates the RTP and RTCP ports is searched across the
-    // entire remainder of the Transport value instead of only within the
-    // server_port parameter (up to the next ';'). With a single-port
-    // server_port and a later quoted parameter the second stoi throws, so the
-    // (correct) -1 is reached by accident.
+    // The '-' that separates the RTP and RTCP ports is only looked for inside
+    // the server_port parameter (up to the next ';'), so a dash living in a
+    // later parameter can neither be used as the separator nor make the parse
+    // throw.
     rtspCtx w1{};
     w1.server_rtp_port = 1111;
     w1.server_rtcp_port = 2222;
@@ -346,27 +345,54 @@ void test_parse_server_ports()
     CHECK_EQ(w1.server_rtp_port, 1111);
     CHECK_EQ(w1.server_rtcp_port, 2222);
 
-    // Same weakness, now with an observable wrong answer: the dash of a later
-    // numeric parameter is used, so a malformed (single-port) server_port is
-    // accepted and the RTCP port is taken from client_port.
+    // A single-port server_port must not pair with the dash of a later
+    // parameter, and must leave the context untouched.
     rtspCtx w2{};
     const std::string cross =
         "RTSP/1.0 200 OK\r\n"
         "Transport: RTP/AVP;unicast;server_port=6970;client_port=9000-9001\r\n\r\n";
-    XCHECK_EQ(rtspParser::parse_server_ports(cross, w2), -1,
-              "dash is searched across the whole Transport value, so a single-port "
-              "server_port pairs with a dash from a later parameter");
-    XCHECK_EQ(static_cast<int>(w2.server_rtcp_port), 0,
-              "RTCP port harvested from the client_port parameter (9001)");
+    CHECK_EQ(rtspParser::parse_server_ports(cross, w2), -1);
+    CHECK_EQ(static_cast<int>(w2.server_rtp_port), 0);
+    CHECK_EQ(static_cast<int>(w2.server_rtcp_port), 0);
 
-    // The interleaved branch has the identical weakness.
+    // The interleaved branch is bounded the same way.
     rtspCtx w3{};
     const std::string cross_tcp =
         "RTSP/1.0 200 OK\r\n"
         "Transport: RTP/AVP/TCP;unicast;interleaved=0;ssrc=1;x=7-9\r\n\r\n";
-    XCHECK_EQ(rtspParser::parse_server_ports(cross_tcp, w3), -1,
-              "interleaved= without a range still matches a dash from an unrelated "
-              "parameter later in the Transport value");
+    CHECK_EQ(rtspParser::parse_server_ports(cross_tcp, w3), -1);
+    CHECK_EQ(static_cast<int>(w3.server_rtcp_port), 0);
+
+    // mode="play-record" before the range must not be mistaken for it either.
+    rtspCtx w4{};
+    CHECK_EQ(rtspParser::parse_server_ports(
+                 "RTSP/1.0 200 OK\r\n"
+                 "Transport: RTP/AVP;unicast;mode=\"play-record\";server_port=6970-6971\r\n\r\n",
+                 w4),
+             0);
+    CHECK_EQ(w4.server_rtp_port, 6970);
+    CHECK_EQ(w4.server_rtcp_port, 6971);
+
+    // Junk inside the parameter is rejected instead of being truncated away.
+    rtspCtx w5{};
+    CHECK_EQ(rtspParser::parse_server_ports(
+                 "RTSP/1.0 200 OK\r\nTransport: RTP/AVP;server_port=6970-69x1\r\n\r\n", w5),
+             -1);
+    rtspCtx w6{};
+    CHECK_EQ(rtspParser::parse_server_ports(
+                 "RTSP/1.0 200 OK\r\nTransport: RTP/AVP;server_port=-6971\r\n\r\n", w6),
+             -1);
+    rtspCtx w7{};
+    CHECK_EQ(rtspParser::parse_server_ports(
+                 "RTSP/1.0 200 OK\r\nTransport: RTP/AVP/TCP;interleaved=0-1x\r\n\r\n", w7),
+             -1);
+
+    // Padding around the numbers is still tolerated.
+    rtspCtx w8{};
+    CHECK_EQ(rtspParser::parse_server_ports(
+                 "RTSP/1.0 200 OK\r\nTransport: RTP/AVP;server_port=6970-6971 \r\n\r\n", w8),
+             0);
+    CHECK_EQ(w8.server_rtcp_port, 6971);
 }
 
 // ---------------------------------------------------------------------- URL
@@ -534,10 +560,9 @@ void test_sdp()
         CHECK_EQ(sz(v.attributes.count("range")), sz(0));
         CHECK_EQ(sz(a.attributes.count("range")), sz(0));
 
-        // property attributes (no ':') are silently discarded
-        XCHECK_EQ(sz(v.attributes.count("recvonly")), sz(1),
-                  "flag attributes such as a=recvonly are dropped because "
-                  "parseAttribute requires a ':' separator");
+        // property attributes (no ':') are kept with an empty value
+        CHECK_EQ(sz(v.attributes.count("recvonly")), sz(1));
+        CHECK_EQ(attr_of(v, "recvonly"), std::string(""));
 
         SUITE("SDP::parseSDP / b= bandwidth");
 
@@ -550,6 +575,34 @@ void test_sdp()
         XCHECK_EQ(sz(v.bandwidth.count("AS")), sz(1),
                   "Media::bandwidth is never populated; media-level b= is not "
                   "bound to its m= section");
+    }
+
+    SUITE("SDP::parseSDP / property attributes");
+
+    // The other common RFC 4566 flag attributes, and a value attribute whose
+    // value itself contains colons, all land in the map.
+    rtspCtx flags{};
+    rtspParser::SDP::parseSDP(
+        "v=0\r\n"
+        "m=video 0 RTP/AVP 96\r\n"
+        "a=sendonly\r\n"
+        "a=rtcp-mux\r\n"
+        "a=control:rtsp://192.0.2.10:554/live/trackID=1\r\n"
+        "a=\r\n",
+        flags);
+    CHECK_EQ(sz(flags.sdp.media_streams.size()), sz(1));
+    if (flags.sdp.media_streams.size() == 1)
+    {
+        const Media &f = flags.sdp.media_streams[0];
+        CHECK_EQ(attr_of(f, "sendonly"), std::string(""));
+        CHECK_EQ(attr_of(f, "rtcp-mux"), std::string(""));
+        // only the first ':' separates key from value
+        CHECK_EQ(attr_of(f, "control"),
+                 std::string("rtsp://192.0.2.10:554/live/trackID=1"));
+        CHECK_EQ(f.trackID, std::string("rtsp://192.0.2.10:554/live/trackID=1"));
+        // a bare "a=" has no key and is not stored
+        CHECK_EQ(sz(f.attributes.count("")), sz(0));
+        CHECK_EQ(sz(f.attributes.size()), sz(3));
     }
 
     SUITE("SDP::parseSDP / robustness");

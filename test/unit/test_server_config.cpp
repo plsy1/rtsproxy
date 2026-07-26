@@ -421,13 +421,10 @@ static void test_wrong_typed_value()
 {
     SUITE("loadFromFile: a wrong-typed settings value");
 
-    // loadFromFile wraps only nlohmann::json::parse() in a try/catch, and that
-    // catch clause is `catch (const nlohmann::json::parse_error&)`. The whole
-    // settings-application block below it is unguarded, so `s["port"].get<int>()`
-    // on a JSON *string* raises nlohmann::json::type_error (id 302,
-    // "type must be number, but is string") which escapes loadFromFile entirely.
-    // ProxyServer::run() happens to have an outer catch, but the contract of
-    // loadFromFile itself -- "returns bool, false on bad config" -- is violated.
+    // `s["port"].get<int>()` on a JSON *string* raises nlohmann::json::type_error
+    // (id 302, "type must be number, but is string"). loadFromFile has to contain
+    // that and report it the way it reports a syntax error: return false, throw
+    // nothing, name the offending key in the log.
 
     reset_to_defaults();
     ServerConfig::setPort(6001);
@@ -440,37 +437,24 @@ static void test_wrong_typed_value()
 
     LoadOutcome o = load(path);
 
-    // Document precisely what escapes today.
-    CHECK_EQ(o.threw, true);
-    CHECK_EQ(o.kind, std::string("nlohmann::json::type_error"));
-    CHECK_EQ(o.json_id, 302);
+    CHECK(!o.threw);
+    CHECK_EQ(o.kind, std::string(""));
+    CHECK_EQ(o.outcome, std::string("false"));
 
-    // What it *should* do: reject the file the same way it rejects a syntax
-    // error -- report false, throw nothing.
-    XCHECK(!o.threw, "loadFromFile catches only nlohmann::json::parse_error, so a "
-                     "wrong-typed settings value throws json::type_error (302) out "
-                     "of the function instead of returning false");
-    XCHECK_EQ(o.outcome, std::string("false"),
-              "loadFromFile never returns on a type_error; it unwinds, so callers "
-              "cannot distinguish 'bad config' from 'no config'");
-
-    // The throw happens mid-application, so the file is applied partially:
-    // the blacklist landed, but auth_token (listed after "port") never did.
+    // A rejected file is applied all-or-nothing: the blacklist is staged and
+    // only committed once the settings block has gone through.
     CHECK_EQ(ServerConfig::getPort(), 6001);
     CHECK_EQ(ServerConfig::getToken(), std::string(""));
-    XCHECK_EQ(ServerConfig::getBlacklist().size(), static_cast<size_t>(0),
-              "a rejected config file is applied partially: the blacklist block "
-              "runs before the settings block and is not rolled back");
+    CHECK_EQ(ServerConfig::getBlacklist().size(), static_cast<size_t>(0));
 
-    // Same failure mode for a wrong-typed bool.
+    // Same handling for a wrong-typed bool.
     reset_to_defaults();
     std::string boolpath = write_cfg("wrong_type_bool.json", R"({
         "settings": { "strip_padding": "yes" }
     })");
     LoadOutcome ob = load(boolpath);
-    CHECK_EQ(ob.kind, std::string("nlohmann::json::type_error"));
-    XCHECK_EQ(ob.outcome, std::string("false"),
-              "wrong-typed bool escapes as json::type_error instead of returning false");
+    CHECK(!ob.threw);
+    CHECK_EQ(ob.outcome, std::string("false"));
     CHECK_EQ(ServerConfig::isStripPadding(), false);
 }
 
@@ -481,15 +465,13 @@ static void test_out_of_range_and_invalid_enum_values()
     reset_to_defaults();
     ServerConfig::setPort(6002);
 
-    // setPort() throws std::out_of_range; loadFromFile does not guard it either.
+    // setPort() throws std::out_of_range, which is not a JSON exception at all.
     std::string bad_port = write_cfg("bad_port.json", R"({
         "settings": { "port": 70000 }
     })");
     LoadOutcome o = load(bad_port);
-    CHECK_EQ(o.kind, std::string("std::out_of_range"));
-    XCHECK_EQ(o.outcome, std::string("false"),
-              "an out-of-range port makes setPort throw std::out_of_range straight "
-              "through loadFromFile instead of being reported as a load failure");
+    CHECK(!o.threw);
+    CHECK_EQ(o.outcome, std::string("false"));
     CHECK_EQ(ServerConfig::getPort(), 6002);
 
     // setNatMethod() throws std::invalid_argument for anything but stun/zte.
@@ -498,10 +480,8 @@ static void test_out_of_range_and_invalid_enum_values()
         "settings": { "nat_method": "upnp" }
     })");
     LoadOutcome o2 = load(bad_method);
-    CHECK_EQ(o2.kind, std::string("std::invalid_argument"));
-    XCHECK_EQ(o2.outcome, std::string("false"),
-              "an unknown nat_method throws std::invalid_argument out of loadFromFile "
-              "instead of being reported as a load failure");
+    CHECK(!o2.threw);
+    CHECK_EQ(o2.outcome, std::string("false"));
     CHECK_EQ(ServerConfig::getNatMethod(), std::string("stun"));
 
     // Boundary values that are legal must be accepted without complaint.
@@ -521,6 +501,93 @@ static void test_out_of_range_and_invalid_enum_values()
     CHECK_EQ(ServerConfig::getBufferPoolCount(), 1);
     CHECK_EQ(ServerConfig::getBufferPoolBlockSize(), 64);
     CHECK_EQ(ServerConfig::getStunPort(), 1);
+}
+
+static void test_rejected_file_is_applied_all_or_nothing()
+{
+    SUITE("loadFromFile: a rejected file leaves no half-applied state behind");
+
+    reset_to_defaults();
+    ServerConfig::setPort(6003);
+    ServerConfig::setToken("keep-me");
+    ServerConfig::setBlacklist({"192.0.2.70"});
+
+    // Every one of these is valid except nat_method, and "port" is applied
+    // before it; none of them may survive the rejection.
+    std::string path = write_cfg("mixed_valid_and_bad.json", R"({
+        "blacklist": ["192.0.2.71", "192.0.2.72"],
+        "settings": {
+            "port": 9300,
+            "nat_method": "upnp",
+            "auth_token": "never-applied",
+            "buffer_pool_count": 4096
+        },
+        "replace_templates": [
+            { "action": "replace", "match": "/tv/192.0.2.80", "replacement": "/tv/192.0.2.81" }
+        ]
+    })");
+
+    LoadOutcome o = load(path);
+    CHECK(!o.threw);
+    CHECK_EQ(o.outcome, std::string("false"));
+
+    CHECK_EQ(ServerConfig::getPort(), 6003);
+    CHECK_EQ(ServerConfig::getToken(), std::string("keep-me"));
+    CHECK_EQ(ServerConfig::getBufferPoolCount(), 8192);
+    CHECK_EQ(ServerConfig::getBlacklist().size(), static_cast<size_t>(1));
+    CHECK_EQ(ServerConfig::getBlacklist()[0], std::string("192.0.2.70"));
+
+    // replace_templates sits after the settings block, so it is not installed
+    // either: the rewriter still has whatever the previous load left there.
+    std::string out;
+    CHECK_EQ(URLRewriter::rewrite_path("/tv/192.0.2.80:554/live?a=1", out), true);
+    CHECK_EQ(out, std::string("rtsp://192.0.2.80:554/live?a=1"));
+
+    // log_level is applied mid-block, so it has to be rolled back too.
+    reset_to_defaults();
+    Logger::setLogLevel(LogLevel::ERROR);
+    std::string late = write_cfg("bad_after_log_level.json", R"({
+        "settings": { "log_level": "debug", "stun_port": 0 }
+    })");
+    LoadOutcome o2 = load(late);
+    CHECK(!o2.threw);
+    CHECK_EQ(o2.outcome, std::string("false"));
+    CHECK_EQ(static_cast<int>(Logger::getLogLevel()), static_cast<int>(LogLevel::ERROR));
+    CHECK_EQ(ServerConfig::getStunPort(), 19302);
+}
+
+static void test_unusable_replace_templates_are_dropped()
+{
+    SUITE("loadFromFile: replace_templates entries that can never fire are dropped");
+
+    reset_to_defaults();
+
+    // Only the last entry is usable; the rest have no string action/match, so
+    // rewrite_path could never apply them anyway.
+    std::string path = write_cfg("templates_junk.json", R"({
+        "replace_templates": [
+            "not-an-object",
+            42,
+            { "action": "replace" },
+            { "match": "/tv/192.0.2.90" },
+            { "action": 5, "match": "/tv/192.0.2.90" },
+            { "action": "replace",
+              "match": "/tv/192.0.2.90",
+              "replacement": "/tv/192.0.2.91" }
+        ]
+    })");
+
+    LoadOutcome o = load(path);
+    CHECK(!o.threw);
+    CHECK_EQ(o.returned, true);
+
+    std::string out;
+    CHECK_EQ(URLRewriter::rewrite_path("/tv/192.0.2.90:554/live?a=1", out), true);
+    CHECK_EQ(out, std::string("rtsp://192.0.2.91:554/live?a=1"));
+
+    // Leave the global rewriter empty for anyone running after us.
+    std::string none = write_cfg("templates_none2.json", R"({"replace_templates": []})");
+    CHECK_EQ(load(none).returned, true);
 }
 
 static void test_json_path_accessor()
@@ -562,6 +629,8 @@ int main()
     test_broken_json();
     test_wrong_typed_value();
     test_out_of_range_and_invalid_enum_values();
+    test_rejected_file_is_applied_all_or_nothing();
+    test_unusable_replace_templates_are_dropped();
     test_json_path_accessor();
 
     reset_to_defaults();

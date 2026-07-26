@@ -21,12 +21,15 @@ public:
 
     /**
      * Release a pair of ports starting with 'port'.
+     * 'port' must be the even port returned by a previous acquire_pair();
+     * anything else (odd port, foreign port, double release) is ignored.
      */
     void release_pair(uint16_t port);
 
     /**
      * Mark a port as externally occupied (failed to bind).
-     * This port will be skipped for a while.
+     * This port is skipped for the remaining lifetime of the process:
+     * there is no expiry and no way to un-mark it.
      */
     void mark_occupied(uint16_t port);
 
@@ -43,4 +46,6 @@ private:
     uint16_t next_port_{20000};
     
     std::set<uint16_t> used_ports_;
+    // Even ports handed out by acquire_pair() and not yet released.
+    std::set<uint16_t> allocated_bases_;
 };
