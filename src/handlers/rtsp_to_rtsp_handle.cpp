@@ -14,22 +14,20 @@ bool RtspToRtspHandle::dispatch(int client_fd, const sockaddr_in &client_addr, c
     std::string client_host = std::string(inet_ntoa(client_addr.sin_addr)) + ":" + std::to_string(ntohs(client_addr.sin_port));
     
     try {
-        rtspCtx ctx;
-        if (rtspParser::parse_url(info.upstream_url, ctx) != 0) {
-            throw std::runtime_error("Failed to parse RTSP URL: " + info.upstream_url);
-        }
+        // Resolve once, then audit the exact context the client will connect with:
+        // a second parse would re-resolve DNS and could yield a different address.
+        auto config = RTSPToRtspClient::resolve_upstream(raw_request);
 
         // Security Audit
-        if (BlacklistChecker::is_blacklisted(ctx.server_ip)) {
-            throw std::runtime_error("Upstream " + ctx.server_ip + " is blacklisted.");
+        if (BlacklistChecker::is_blacklisted(config.ctx.server_ip)) {
+            throw std::runtime_error("Upstream " + config.ctx.server_ip + " is blacklisted.");
         }
-        if (BlacklistChecker::is_loopback(ctx.server_ip, ctx.server_rtsp_port, client_fd)) {
+        if (BlacklistChecker::is_loopback(config.ctx.server_ip, config.ctx.server_rtsp_port, client_fd)) {
             throw std::runtime_error("Recursive connection detected.");
         }
 
         Logger::debug("[RTSP2RTSP] Dispatching session: " + client_host + " -> " + info.upstream_url);
-        
-        auto config = RTSPToRtspClient::resolve_upstream(raw_request);
+
         auto client = std::make_unique<RTSPToRtspClient>(loop, pool, client_addr, client_fd, config, raw_request);
         loop->add_client_to_map(client_fd, std::move(client));
 

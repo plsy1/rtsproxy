@@ -126,14 +126,20 @@ int main()
                     tst::show(i.method).c_str(), tst::show(i.raw_uri).c_str());
     }
     {
-        // ...and the early return happens *before* sanitize_input(), so on the
-        // failure path raw bytes reach the caller (and its log line) unescaped.
+        // ...and the early return still sanitizes what the extraction managed to
+        // write, so no raw byte reaches the caller (and its log line).
         RequestInfo i = P("GET /a\x1b[31mBOOM");
-        XCHECK_EQ(first_raw_byte(i.raw_uri, '\x1b'), NPOS_OK,
-                  "the early return for a short request line skips sanitize_input(), "
-                  "so a raw ESC survives in raw_uri -- terminal injection via logs");
-        XCHECK_EQ(first_raw_byte(P("GET /a\\b").raw_uri, '\\'), NPOS_OK,
-                  "backslash stripping is also skipped on the early-return path");
+        CHECK_EQ(first_raw_byte(i.raw_uri, '\x1b'), NPOS_OK);
+        CHECK_EQ(i.raw_uri, "/a\\x1b[31mBOOM");
+        CHECK_EQ(first_raw_byte(P("GET /a\\b").raw_uri, '\\'), NPOS_OK);
+        CHECK_EQ(P("GET /a\\b").raw_uri, "/ab");
+        // The method token is escaped on this path as well.
+        CHECK_EQ(P("\x1bGET /a").method, "\\x1bGET");
+        // %5C removal happens here too, and the early return is still taken.
+        RequestInfo j = P("GET /rtp%5C/192.0.2.10:5540/live");
+        CHECK_EQ(j.raw_uri, "/rtp/192.0.2.10:5540/live");
+        CHECK_EQ(j.upstream_url, "");
+        CHECK_EQ(j.clean_uri, "");
     }
     {
         // Leading whitespace is skipped by the stream extraction.
@@ -383,39 +389,44 @@ int main()
     }
 
     // ------------------------------------------------------------------
-    SUITE("upstream_url: unanchored prefix search");
+    SUITE("upstream_url: prefix is anchored at the start of the path");
     // ------------------------------------------------------------------
     ServerConfig::setToken("");
     {
-        // find("/rtp/") is not anchored to the start of the path, so "/rtp/"
-        // appearing anywhere -- here only inside a query parameter value on an
-        // unrelated endpoint -- is enough to make the parser build an upstream
-        // URL out of it. An attacker-supplied query parameter therefore picks
-        // the upstream host: this should be a prefix test on the path.
+        // "/rtp/" inside a query parameter value on an unrelated endpoint must
+        // not select the upstream host, and the query itself is left alone.
         RequestInfo i = P("GET /index?x=/rtp/192.0.2.1:554/s HTTP/1.1");
         CHECK_EQ(i.clean_uri, "/index?x=/rtp/192.0.2.1:554/s");
-        std::printf("  [ NOTE ] /index?x=/rtp/... yields upstream_url = %s\n",
-                    tst::show(i.upstream_url).c_str());
-        XCHECK_EQ(i.upstream_url, "",
-                  "unanchored find(\"/rtp/\"): a /rtp/ inside the query string of an "
-                  "unrelated path still sets upstream_url (attacker picks the upstream)");
+        CHECK_EQ(i.upstream_url, "");
     }
     {
-        // Same defect via a path that merely contains the prefix deeper down.
-        RequestInfo i = P("GET /static/rtp/192.0.2.1:554/s HTTP/1.1");
-        XCHECK_EQ(i.upstream_url, "",
-                  "unanchored find(\"/rtp/\"): /static/rtp/... is not a stream path but "
-                  "still resolves to an upstream");
+        // A path that merely contains the prefix deeper down is not a stream.
+        CHECK_EQ(P("GET /static/rtp/192.0.2.1:554/s HTTP/1.1").upstream_url, "");
+        CHECK_EQ(P("GET /a/tv/192.0.2.1:554/s HTTP/1.1").upstream_url, "");
     }
     {
-        // /rtp/ is searched before /tv/, so on a genuine /tv/ path that happens
-        // to contain "/rtp/" later the wrong (and much shorter) sub-path wins.
+        // A genuine /tv/ path that happens to contain "/rtp/" further along is
+        // no longer truncated to the /rtp/ suffix.
         RequestInfo i = P("GET /tv/192.0.2.20:554/a/rtp/x HTTP/1.1");
-        std::printf("  [ NOTE ] /tv/...a/rtp/x yields upstream_url = %s\n",
-                    tst::show(i.upstream_url).c_str());
-        XCHECK_EQ(i.upstream_url, "rtsp://192.0.2.20:554/a/rtp/x",
-                  "the /rtp/ search runs first and is unanchored, so a /tv/ path "
-                  "containing /rtp/ is truncated to the /rtp/ suffix");
+        CHECK_EQ(i.upstream_url, "rtsp://192.0.2.20:554/a/rtp/x");
+    }
+    {
+        // An absolute URI keeps working: RTSP clients send one on every request
+        // after the redirect, so the scheme and authority are skipped.
+        CHECK_EQ(P("DESCRIBE rtsp://192.0.2.9:8554/rtp/192.0.2.10:5540/live RTSP/1.0").upstream_url,
+                 "rtsp://192.0.2.10:5540/live");
+        CHECK_EQ(P("PLAY rtsp://192.0.2.9:8554/tv/192.0.2.20:554/ch?a=1 RTSP/1.0").upstream_url,
+                 "rtsp://192.0.2.20:554/ch?a=1");
+        // ...but only when the prefix really starts the path.
+        CHECK_EQ(P("DESCRIBE rtsp://192.0.2.9:8554/x/rtp/192.0.2.10:5540/live RTSP/1.0").upstream_url,
+                 "");
+        // An authority with no path at all must not be mistaken for one.
+        CHECK_EQ(P("OPTIONS rtsp://192.0.2.9:8554 RTSP/1.0").upstream_url, "");
+    }
+    {
+        // A "://" that only appears inside the query string must not be taken
+        // for a scheme separator and move the anchor into the query.
+        CHECK_EQ(P("GET /index?u=http://h/rtp/192.0.2.1:554/s HTTP/1.1").upstream_url, "");
     }
 
     ServerConfig::setToken("");

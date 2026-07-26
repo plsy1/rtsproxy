@@ -153,14 +153,24 @@ int main()
     CHECK_EQ(bl("10.1.2.3"), false);
     set_bl({"10.0.0.0/0x8"});
     CHECK_EQ(bl("10.1.2.3"), false);
+    set_bl({"10.0.0.0/0X8"});
+    CHECK_EQ(bl("10.1.2.3"), false);
 
-    // BUG: std::stoi accepts "-0" as 0, and the (bits < 0) guard does not
-    // reject it, so a malformed prefix silently becomes /0 and blacklists the
-    // entire IPv4 space.
+    // A prefix that is not a plain non-negative integer must leave the entry
+    // inert. std::stoi() would read "-0" as 0 and the (bits < 0) guard cannot
+    // catch it, which would silently blacklist the entire IPv4 space.
     set_bl({"10.0.0.0/-0"});
-    XCHECK_EQ(bl("8.8.8.8"), false,
-              "blacklist_checker.cpp:57 stoi accepts \"-0\"; malformed prefix "
-              "degrades to /0 and matches every IPv4 address");
+    CHECK_EQ(bl("8.8.8.8"), false);
+    CHECK_EQ(bl("10.1.2.3"), false);
+    set_bl({"10.0.0.0/+8"});
+    CHECK_EQ(bl("8.8.8.8"), false);
+    set_bl({"10.0.0.0/ 8"});
+    CHECK_EQ(bl("10.1.2.3"), false);
+    set_bl({"10.0.0.0/-8"});
+    CHECK_EQ(bl("8.8.8.8"), false);
+    // Well-formed prefixes still work after the tightened validation.
+    set_bl({"10.0.0.0/08"});
+    CHECK_EQ(bl("10.1.2.3"), true);
 
     // ---------------------------------------------------------------- //
     SUITE("wildcard: leading '*' (suffix match)");
@@ -210,27 +220,38 @@ int main()
     CHECK_EQ(bl("10.1.2.3"), false); // "10.0.*.0" is not a valid base address
 
     // ---------------------------------------------------------------- //
-    SUITE("host comparison is case-sensitive");
+    SUITE("host comparison is case-insensitive (RFC 4343)");
     // ---------------------------------------------------------------- //
     // Hosts below contain an empty DNS label, so the resolver rejects them
     // locally and no query is ever emitted; the blacklist holds no IP-shaped
     // entries, so a resolver result could not change the answer either.
     set_bl({"CAM..BLOCKED"});
     CHECK_EQ(bl("CAM..BLOCKED"), true); // identical spelling matches
-    // DNS names are case-insensitive (RFC 4343), so an entry must block every
-    // case variant of the same name; today it does not, which is a blacklist
-    // bypass.
-    XCHECK(bl("cam..blocked"),
-           "blacklist_checker.cpp:26 exact match uses case-sensitive ==; "
-           "changing hostname case bypasses the blacklist");
-    XCHECK(bl("Cam..Blocked"),
-           "blacklist_checker.cpp:26 exact match is case-sensitive");
+    // DNS names are case-insensitive, so an entry blocks every case variant of
+    // the same name.
+    CHECK(bl("cam..blocked"));
+    CHECK(bl("Cam..Blocked"));
+    CHECK_EQ(bl("other..blocked"), false); // folding must not widen the match
+    // A lower-case entry blocks an upper-case host too.
+    set_bl({"cam..blocked"});
+    CHECK(bl("CAM..BLOCKED"));
 
     set_bl({"*.EVIL..BLOCKED"});
     CHECK_EQ(bl("host.EVIL..BLOCKED"), true);
-    XCHECK(bl("host.evil..blocked"),
-           "blacklist_checker.cpp:86 wildcard suffix compare is case-sensitive; "
-           "case variation bypasses *. patterns");
+    CHECK(bl("host.evil..blocked"));
+    CHECK(bl("HOST.Evil..Blocked"));
+    CHECK_EQ(bl("host.good..blocked"), false);
+
+    // Trailing '*' (prefix match) folds case as well.
+    set_bl({"CAM..EVIL*"});
+    CHECK(bl("cam..evil.example"));
+    CHECK(bl("CAM..EVIL"));
+    CHECK_EQ(bl("cam..good.example"), false);
+
+    // Case folding must not disturb numeric CIDR parsing.
+    set_bl({"10.0.0.0/8"});
+    CHECK_EQ(bl("10.1.2.3"), true);
+    CHECK_EQ(bl("11.1.2.3"), false);
 
     // ---------------------------------------------------------------- //
     SUITE("several patterns of mixed kinds in one blacklist");
