@@ -313,10 +313,32 @@ std::string RTSPToRtspClient::patch_response_for_client(const std::string &resp)
         // Parse server_port from upstream response and remember it.
         std::regex sp_re(R"(server_port=(\d+)-(\d+))");
         std::smatch sm;
+        uint16_t srv_rtp = 0, srv_rtcp = 0;
+        bool have_server_ports = false;
         if (std::regex_search(transport, sm, sp_re))
         {
-            uint16_t srv_rtp = static_cast<uint16_t>(std::stoi(sm[1]));
-            uint16_t srv_rtcp = static_cast<uint16_t>(std::stoi(sm[2]));
+            try
+            {
+                int parsed_rtp = std::stoi(sm[1]);
+                int parsed_rtcp = std::stoi(sm[2]);
+                if (parsed_rtp >= 1 && parsed_rtp <= 65535 &&
+                    parsed_rtcp >= 1 && parsed_rtcp <= 65535)
+                {
+                    srv_rtp = static_cast<uint16_t>(parsed_rtp);
+                    srv_rtcp = static_cast<uint16_t>(parsed_rtcp);
+                    have_server_ports = true;
+                }
+            }
+            catch (...)
+            {
+            }
+
+            if (!have_server_ports)
+                Logger::warn("[MITM] Ignoring invalid server_port in upstream Transport: " + transport);
+        }
+
+        if (have_server_ports)
+        {
             std::string rtp_source = ctx_.server_ip;
             std::regex source_re(R"(source=([0-9.]+))");
             std::smatch source_match;

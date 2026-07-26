@@ -152,6 +152,8 @@ void RTSPToHttpClient::handle_client(uint32_t event)
     if (event & EPOLLIN)
     {
         on_client_readable();
+        if (is_closed_)
+            return;
     }
     if (event & EPOLLOUT)
     {
@@ -597,6 +599,30 @@ void RTSPToHttpClient::on_client_writable()
 
 void RTSPToHttpClient::on_client_readable()
 {
+    // Nothing is expected from the client once its request has been dispatched,
+    // but the fd stays armed with EPOLLIN and the loop is level-triggered, so
+    // anything it does send must be drained or epoll_wait spins on it forever.
+    char discard[4096];
+    while (true)
+    {
+        ssize_t n = recv(client_fd_, discard, sizeof(discard), 0);
+        if (n > 0)
+            continue;
+
+        if (n == 0)
+        {
+            on_client_closed();
+            return;
+        }
+
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+
+        on_client_closed();
+        return;
+    }
 }
 
 void RTSPToHttpClient::on_client_closed()
