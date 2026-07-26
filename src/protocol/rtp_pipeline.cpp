@@ -13,6 +13,7 @@ RtpPipeline::~RtpPipeline() = default;
 
 void RtpPipeline::reset() {
     wait_for_keyframe_ = ServerConfig::isWaitKeyframe();
+    dropped_while_waiting_ = 0;
 }
 
 bool RtpPipeline::process(uint8_t *buf, size_t &len) {
@@ -21,7 +22,13 @@ bool RtpPipeline::process(uint8_t *buf, size_t &len) {
     // 1. Startup Keyframe Sync
     if (unlikely(wait_for_keyframe_)) {
         if (check_keyframe(buf, len)) {
-            Logger::debug("[Pipeline] Keyframe/PAT found, start forwarding");
+            Logger::debug("[Pipeline] Keyframe found, start forwarding");
+            wait_for_keyframe_ = false;
+        } else if (unlikely(++dropped_while_waiting_ >= KEYFRAME_WAIT_LIMIT)) {
+            // Codecs we cannot parse (or scrambled payloads) would otherwise keep
+            // the gate shut forever, so give up and start forwarding anyway.
+            Logger::debug("[Pipeline] No keyframe after " + std::to_string(KEYFRAME_WAIT_LIMIT) +
+                          " packets, start forwarding anyway");
             wait_for_keyframe_ = false;
         } else {
             return false; // Drop until keyframe
@@ -63,14 +70,16 @@ void RtpPipeline::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len) {
             uint8_t padding_len = buf[len - 1];
             if (likely(padding_len > 0 && padding_len <= (len - payload_offset))) {
                 len -= padding_len;
+                buf[0] &= ~0x20; // Clear padding bit only once the padding is really gone
             }
-            buf[0] &= ~0x20; // Clear padding bit
         }
 
         // 2. Strip TS Null Packets (PID 0x1FFF)
         size_t payload_len = len - payload_offset;
         // Check if it's MPEG-TS (starts with 0x47)
         if (likely(payload_len >= 188 && buf[payload_offset] == 0x47)) {
+            size_t whole_len = payload_len - (payload_len % 188);
+            size_t tail_len = payload_len - whole_len;
             size_t new_payload_len = 0;
             for (size_t i = 0; i + 188 <= payload_len; i += 188) {
                 uint16_t pid = ((buf[payload_offset + i + 1] & 0x1F) << 8) | buf[payload_offset + i + 2];
@@ -81,10 +90,13 @@ void RtpPipeline::strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len) {
                     new_payload_len += 188;
                 }
             }
-            len = payload_offset + new_payload_len;
-            if (new_payload_len == 0) len = 0;
-            
-            buf[0] &= ~0x20; // Ensure padding bit is clear if we modified the packet
+            // A trailing partial TS packet is not ours to drop, keep it after the
+            // compacted packets.
+            if (unlikely(tail_len > 0 && new_payload_len != whole_len)) {
+                memmove(buf + payload_offset + new_payload_len, buf + payload_offset + whole_len, tail_len);
+            }
+            len = payload_offset + new_payload_len + tail_len;
+            if (new_payload_len == 0 && tail_len == 0) len = 0;
         }
     }
 }
@@ -96,32 +108,40 @@ bool RtpPipeline::check_keyframe(const uint8_t *buf, size_t len) {
     if (likely(payload_off + 188 <= len && buf[payload_off] == 0x47)) {
         for (size_t i = 0; payload_off + i + 188 <= len; i += 188) {
             const uint8_t *ts = buf + payload_off + i;
-            uint16_t pid = ((ts[1] & 0x1F) << 8) | ts[2];
-            
-            // 1. PAT is a good sync point as headers usually follow
-            if (pid == 0) return true; 
 
-            // 2. Check for Random Access Indicator in Adaptation Field
+            // 1. Check for Random Access Indicator in Adaptation Field
             uint8_t afc = (ts[3] & 0x30) >> 4;
             if (afc >= 2 && ts[4] > 0 && (ts[5] & 0x40)) return true;
 
-            // 3. Deep scan for H.264 NAL units (SPS=7, PPS=8, IDR=5)
+            // 2. Deep scan for H.264 NAL units (SPS=7, PPS=8, IDR=5)
             // This handles cases where RAI bit is not set but headers are present.
-            size_t ts_payload_off = 4;
-            if (afc == 2 || afc == 3) ts_payload_off += 1 + ts[4];
-            if (ts_payload_off < 188) {
-                const uint8_t *data = ts + ts_payload_off;
-                size_t data_len = 188 - ts_payload_off;
-                for (size_t j = 0; j + 4 < data_len; ++j) {
-                    if (data[j] == 0x00 && data[j+1] == 0x00 && data[j+2] == 0x01) {
-                        // H.264 NAL type is in bits 0-4 of the first byte
-                        uint8_t nal_type_h264 = data[j+3] & 0x1F;
-                        if (nal_type_h264 == 7 || nal_type_h264 == 8 || nal_type_h264 == 5) return true;
+            // afc 0 and 2 carry no payload at all, scanning them reads adaptation
+            // stuffing as if it were video.
+            if (afc == 1 || afc == 3) {
+                size_t ts_payload_off = 4;
+                if (afc == 3) ts_payload_off += 1 + ts[4];
+                if (ts_payload_off < 188) {
+                    const uint8_t *data = ts + ts_payload_off;
+                    size_t data_len = 188 - ts_payload_off;
+                    for (size_t j = 0; j + 3 < data_len; ++j) {
+                        if (data[j] == 0x00 && data[j+1] == 0x00 && data[j+2] == 0x01) {
+                            uint8_t nal_hdr = data[j+3];
+                            // forbidden_zero_bit must be 0 in both codecs; when it is set
+                            // this is a PES header (stream_id 0x80-0xFF), not a NAL unit.
+                            if (nal_hdr & 0x80) continue;
 
-                        // H.265 NAL type is in bits 1-6 of the first byte
-                        uint8_t nal_type_h265 = (data[j+3] >> 1) & 0x3F;
-                        if (nal_type_h265 >= 32 && nal_type_h265 <= 34) return true; // VPS, SPS, PPS
-                        if (nal_type_h265 == 19 || nal_type_h265 == 20) return true; // IDR
+                            // H.264 NAL type is in bits 0-4 of the first byte
+                            uint8_t nal_type_h264 = nal_hdr & 0x1F;
+                            if (nal_type_h264 == 7 || nal_type_h264 == 8 || nal_type_h264 == 5) return true;
+
+                            // H.265 NAL type is in bits 1-6 of the first byte
+                            uint8_t nal_type_h265 = (nal_hdr >> 1) & 0x3F;
+                            if (nal_type_h265 == 19 || nal_type_h265 == 20) return true; // IDR
+                            // Type 32-34 alone also matches common H.264 slice headers, so
+                            // demand the second header byte of a base-layer NAL as well.
+                            if (nal_type_h265 >= 32 && nal_type_h265 <= 34 &&
+                                j + 4 < data_len && data[j+4] == 0x01) return true; // VPS, SPS, PPS
+                        }
                     }
                 }
             }

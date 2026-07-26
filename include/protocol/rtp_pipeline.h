@@ -18,9 +18,14 @@ public:
     // Reset the pipeline state (e.g. for a new stream/play)
     void reset();
 
+    // Number of packets dropped while waiting for a keyframe before the gate is
+    // forced open, so an undetectable stream still plays instead of staying black.
+    static constexpr uint32_t KEYFRAME_WAIT_LIMIT = 1024;
+
 private:
     void strip_rtp_padding_and_ts_null(uint8_t *buf, size_t &len);
     bool check_keyframe(const uint8_t *buf, size_t len);
 
     bool wait_for_keyframe_;
+    uint32_t dropped_while_waiting_;
 };

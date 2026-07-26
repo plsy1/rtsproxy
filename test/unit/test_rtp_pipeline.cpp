@@ -72,13 +72,17 @@ static std::vector<uint8_t> make_ts(uint16_t pid, uint8_t tag = FILL)
 }
 
 // TS packet whose payload contains a 00 00 01 start code followed by `nal`.
-static std::vector<uint8_t> make_ts_nal(uint16_t pid, uint8_t nal)
+// `nal2` is the byte after it: the second byte of an H.265 NAL header
+// (nuh_layer_id / nuh_temporal_id_plus1), inert filler otherwise.
+static std::vector<uint8_t> make_ts_nal(uint16_t pid, uint8_t nal,
+                                        uint8_t nal2 = FILL)
 {
     std::vector<uint8_t> ts = make_ts(pid);
     ts[10] = 0x00;
     ts[11] = 0x00;
     ts[12] = 0x01;
     ts[13] = nal;
+    ts[14] = nal2;
     return ts;
 }
 
@@ -294,7 +298,7 @@ int main()
     }
 
     // -----------------------------------------------------------------
-    SUITE("RTP padding: malformed padding_len (known bug)");
+    SUITE("RTP padding: malformed padding_len");
     {
         ServerConfig::setStripPadding(true);
         ServerConfig::setWaitKeyframe(false);
@@ -310,10 +314,7 @@ int main()
         size_t zlen = z.size();
         CHECK(pipe.process(z.data(), zlen));
         CHECK_EQ(zlen, size_t(22)); // length correctly left alone
-        XCHECK_EQ(z[0] & 0x20, 0x20,
-                  "padding bit is cleared unconditionally even when "
-                  "padding_len==0 was not stripped, so the padding octets are "
-                  "handed to the decoder as payload");
+        CHECK_EQ(z[0] & 0x20, 0x20); // ...and the P bit still describes the packet
 
         // padding_len larger than the payload is equally illegal.
         std::vector<uint8_t> b = rtp_header(0, false, true);
@@ -322,9 +323,18 @@ int main()
         size_t blen = b.size();
         CHECK(pipe.process(b.data(), blen));
         CHECK_EQ(blen, size_t(22)); // no under-run of the buffer
-        XCHECK_EQ(b[0] & 0x20, 0x20,
-                  "padding bit is cleared unconditionally even when "
-                  "padding_len(200) > payload(10) was not stripped");
+        CHECK_EQ(b[0] & 0x20, 0x20);
+
+        // Null-packet stripping in the same datagram must not clear the P bit
+        // either: the padding octets are still in there.
+        std::vector<uint8_t> c = rtp_header(0, false, true);
+        append(c, make_ts(0x1FFF, 0x01));
+        append(c, make_ts(0x0100, 0x02));
+        c[c.size() - 1] = 0; // illegal padding_len
+        size_t clen = c.size();
+        CHECK(pipe.process(c.data(), clen));
+        CHECK_EQ(clen, size_t(12 + 188));
+        CHECK_EQ(c[0] & 0x20, 0x20);
 
         // With stripping disabled the packet must be passed through untouched,
         // padding bit included.
@@ -418,19 +428,32 @@ int main()
 
         CHECK(pipe.process(t.data(), tlen));
         CHECK_EQ(t[12 + 4], uint8_t(0x12)); // the whole packet is preserved
-        XCHECK_EQ(tlen, size_t(12 + 188 + 100),
-                  "the compaction loop rewrites len from whole 188-byte units "
-                  "only, so a trailing partial TS packet is silently discarded "
-                  "instead of being forwarded or buffered");
+        CHECK_EQ(tlen, size_t(12 + 188 + 100)); // ...and so is the partial tail
 
-        // Same shape but with the real packet nulled out: the partial tail is
-        // discarded along with it and the datagram vanishes entirely.
+        // Same shape but with the real packet nulled out: only the null packet
+        // goes, the partial tail moves down to take its place.
         std::vector<uint8_t> u = rtp_header();
         append(u, make_ts(0x1FFF, 0x13));
         u.insert(u.end(), 100, 0x5A);
         size_t ulen = u.size();
-        CHECK(!pipe.process(u.data(), ulen));
-        CHECK_EQ(ulen, size_t(0));
+        CHECK(pipe.process(u.data(), ulen));
+        CHECK_EQ(ulen, size_t(12 + 100));
+        CHECK_EQ(u[12], uint8_t(0x5A));
+        CHECK_EQ(u[12 + 99], uint8_t(0x5A));
+
+        // Null packet between two real ones, plus a tail: compaction keeps the
+        // order and the tail lands right behind the second real packet.
+        std::vector<uint8_t> w = rtp_header();
+        append(w, make_ts(0x0100, 0x14));
+        append(w, make_ts(0x1FFF, 0x15));
+        append(w, make_ts(0x0101, 0x16));
+        w.insert(w.end(), 50, 0x5B);
+        size_t wlen = w.size();
+        CHECK(pipe.process(w.data(), wlen));
+        CHECK_EQ(wlen, size_t(12 + 2 * 188 + 50));
+        CHECK_EQ(w[12 + 4], uint8_t(0x14));
+        CHECK_EQ(w[12 + 188 + 4], uint8_t(0x16));
+        CHECK_EQ(w[12 + 2 * 188], uint8_t(0x5B));
 
         // Payload shorter than one TS packet is left alone (no 188-byte unit).
         std::vector<uint8_t> v = rtp_header();
@@ -472,9 +495,11 @@ int main()
         CHECK(gate_opens_for(make_ts_nal(0x0100, 0x68))); // PPS
 
         // H.265: nal type lives in bits 1..6. VPS=32, SPS=33, PPS=34, IDR_W_RADL=19.
-        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x40))); // VPS
-        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x42))); // SPS
-        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x44))); // PPS
+        // The parameter sets are only accepted with a base-layer second header
+        // byte (nuh_layer_id 0, nuh_temporal_id_plus1 1 -> 0x01).
+        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x40, 0x01))); // VPS
+        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x42, 0x01))); // SPS
+        CHECK(gate_opens_for(make_ts_nal(0x0100, 0x44, 0x01))); // PPS
         CHECK(gate_opens_for(make_ts_nal(0x0100, 0x26))); // IDR_W_RADL
 
         // Adaptation-field random access indicator.
@@ -560,40 +585,37 @@ int main()
     }
 
     // -----------------------------------------------------------------
-    SUITE("keyframe gate: KNOWN BUGS (false keyframes)");
+    SUITE("keyframe gate: false keyframes are rejected");
     {
         // 0x41 is an H.264 non-IDR slice (nal_ref_idc=2, type=1) -- by far the
-        // most common byte after a start code in a live stream. The H.265 test
-        // runs unconditionally on the same byte: (0x41 >> 1) & 0x3F == 32,
-        // which is read as a VPS, so the gate opens on the very first P-slice.
-        XCHECK(!gate_opens_for(make_ts_nal(0x0100, 0x41)),
-               "0x41 (H.264 non-IDR slice) satisfies the H.265 test "
-               "(0x41>>1)&0x3F==32 (VPS) and falsely opens the keyframe gate; "
-               "the codec is never checked before applying the H.265 rule");
+        // most common byte after a start code in a live stream. It also reads as
+        // H.265 nal type (0x41 >> 1) & 0x3F == 32 (VPS), so the parameter-set
+        // test must look at the second NAL header byte before believing it.
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0x41)));
 
-        // 0xC0 is the MPEG-1/2 audio PES stream_id -- it follows a 00 00 01
-        // PES start code in every audio packet. (0xC0 >> 1) & 0x3F == 32 too.
-        XCHECK(!gate_opens_for(make_ts_nal(0x0100, 0xC0)),
-               "0xC0 (MPEG audio PES stream_id after a 00 00 01 PES start "
-               "code) also maps to H.265 nal type 32 (VPS) and falsely opens "
-               "the keyframe gate");
+        // 0xC0..0xDF are the MPEG-1/2 audio PES stream_ids -- they follow a
+        // 00 00 01 PES start code in every audio packet and map to nal type 32
+        // as well. The forbidden_zero_bit rules the whole range out.
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0xC0)));
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0xC1)));
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0xDF)));
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0xE0))); // video PES stream_id
 
-        // 0xC1..0xDF (further audio stream_ids) collide the same way.
-        XCHECK(!gate_opens_for(make_ts_nal(0x0100, 0xC1)),
-               "0xC1 (second MPEG audio PES stream_id) maps to H.265 nal type "
-               "32 as well");
+        // Even with a plausible second byte the forbidden_zero_bit still wins.
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0xC0, 0x01)));
+
+        // A real H.265 parameter set byte with a non base-layer second byte is
+        // not enough on its own.
+        CHECK(!gate_opens_for(make_ts_nal(0x0100, 0x40, 0x00)));
 
         // A PAT carries no video at all; joining on it means the client still
         // has to wait for the next real IDR, and meanwhile gets broken frames.
         {
             std::vector<uint8_t> pat = make_ts(0x0000, 0x01);
-            XCHECK(!gate_opens_for(pat),
-                   "a bare PAT (PID 0) opens the keyframe gate on its own, so "
-                   "forwarding starts mid-GOP even though no keyframe has been "
-                   "seen");
+            CHECK(!gate_opens_for(pat));
         }
 
-        // Same, buried after real null packets: still opens on the PAT.
+        // Same, buried behind an ordinary payload packet.
         {
             ServerConfig::setStripPadding(false);
             ServerConfig::setWaitKeyframe(true);
@@ -603,30 +625,87 @@ int main()
             append(p, make_ts(0x0100, 0x01)); // ordinary payload
             append(p, make_ts(0x0000, 0x02)); // PAT
             size_t len = p.size();
-            XCHECK(!pipe.process(p.data(), len),
-                   "the PAT-as-keyframe shortcut also fires when the PAT is "
-                   "not the first TS packet in the datagram");
+            CHECK(!pipe.process(p.data(), len));
+        }
+
+        // afc = 2 is an adaptation field with no payload at all. A start code
+        // pattern inside the stuffing is not video and must not be scanned.
+        {
+            std::vector<uint8_t> ts = make_ts(0x0100, FILL);
+            ts[3] = 0x20; // afc = 2
+            ts[4] = 10;   // adaptation_field_length
+            ts[5] = 0x00; // no random access indicator
+            ts[20] = 0x00;
+            ts[21] = 0x00;
+            ts[22] = 0x01;
+            ts[23] = 0x65; // H.264 IDR pattern, inside the stuffing
+            CHECK(!gate_opens_for(ts));
         }
 
         // Off-by-one at the tail of the TS payload: with afc=1 the scan window
-        // is data[0..183], but the loop guard `j + 4 < data_len` stops at
-        // j == 179, so a start code occupying the final four payload bytes is
-        // never examined and a real IDR there is missed.
+        // is data[0..183], so a start code occupying the final four payload
+        // bytes must still be examined.
         {
             std::vector<uint8_t> ts = make_ts(0x0100, FILL);
             ts[184] = 0x00;
             ts[185] = 0x00;
             ts[186] = 0x01;
             ts[187] = 0x65; // H.264 IDR
-            XCHECK(gate_opens_for(ts),
-                   "scan loop guard is `j + 4 < data_len` instead of "
-                   "`j + 3 < data_len`, so a start code in the last four bytes "
-                   "of a TS payload is skipped and the IDR is missed");
+            CHECK(gate_opens_for(ts));
+        }
+
+        // Same position, but an H.265 parameter set: its second header byte is
+        // past the end of the packet, so it cannot be confirmed and is ignored.
+        {
+            std::vector<uint8_t> ts = make_ts(0x0100, FILL);
+            ts[184] = 0x00;
+            ts[185] = 0x00;
+            ts[186] = 0x01;
+            ts[187] = 0x40; // H.265 VPS, second header byte missing
+            CHECK(!gate_opens_for(ts));
         }
 
         // Leave the shared config in a neutral state for anything that follows.
         ServerConfig::setWaitKeyframe(false);
         ServerConfig::setStripPadding(false);
+    }
+
+    // -----------------------------------------------------------------
+    SUITE("keyframe gate: bounded fallback");
+    {
+        // Dropping forever is worse than starting mid-GOP: a stream whose
+        // keyframes the scanner cannot see (unknown codec, scrambled payload)
+        // must still start playing after a bounded number of packets.
+        ServerConfig::setStripPadding(false);
+        ServerConfig::setWaitKeyframe(true);
+        RtpPipeline pipe;
+        pipe.reset();
+
+        std::vector<uint8_t> p = rtp_header();
+        append(p, make_ts(0x0100, 0x01)); // never a keyframe
+
+        uint32_t opened_at = 0;
+        for (uint32_t i = 1; i <= RtpPipeline::KEYFRAME_WAIT_LIMIT; ++i)
+        {
+            size_t len = p.size();
+            if (pipe.process(p.data(), len))
+            {
+                opened_at = i;
+                break;
+            }
+        }
+        CHECK_EQ(opened_at, RtpPipeline::KEYFRAME_WAIT_LIMIT);
+
+        // Once forced open it stays open.
+        size_t len2 = p.size();
+        CHECK(pipe.process(p.data(), len2));
+
+        // reset() re-arms both the gate and the fallback counter.
+        pipe.reset();
+        size_t len3 = p.size();
+        CHECK(!pipe.process(p.data(), len3));
+
+        ServerConfig::setWaitKeyframe(false);
     }
 
     return tst::summary();
