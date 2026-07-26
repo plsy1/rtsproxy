@@ -262,27 +262,35 @@ void test_timeshift()
     set_templates(R"([{"action":"timeshift","match":"playseek={number}-{number}","shift_hours":8}])");
     CHECK_EQ(rewrite("/tv/192.0.2.10/c?other=1"), std::string("rtsp://192.0.2.10/c?other=1"));
 
-    // --- KNOWN BUG -------------------------------------------------------
-    // The rewrite locates the two times inside match[0] with find() instead of
-    // using the capture-group offsets, so a digit in the pattern's own literal
-    // text is clobbered before the real timestamp is reached.
+    // --- splicing is done by capture-group offset --------------------------
+    // A digit inside the pattern's own literal text ('s2=') must survive: only
+    // the two captured timestamps are rewritten.
     set_templates(R"([{"action":"timeshift","match":"s2={number}-{number}","shift_hours":1}])");
     std::string got = rewrite("/tv/192.0.2.10/c?s2=2-3", ok);
-    CHECK(ok); // the request itself must still succeed
-    XCHECK_EQ(got, std::string("rtsp://192.0.2.10/c?s2=19700101010002-19700101010003"),
-              "shiftTime substitution uses full_match.find(start_time) instead of the "
-              "capture offsets, so the digit in the literal prefix 's2=' is overwritten");
+    CHECK(ok);
+    CHECK_EQ(got, std::string("rtsp://192.0.2.10/c?s2=19700101010002-19700101010003"));
+
+    // Both groups grow from 10 to 14 characters, so the second one has to be
+    // spliced first for the first one's offset to still be valid.
+    set_templates(R"([{"action":"timeshift","match":"playseek={number}-{number}","shift_hours":1}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?playseek=0-60&z=9"),
+             std::string("rtsp://192.0.2.10/c?playseek=19700101010000-19700101010100&z=9"));
+
+    // timeshift uses regex_search, so only the first occurrence is shifted.
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?playseek=0-60&playseek=0-60"),
+             std::string("rtsp://192.0.2.10/c?playseek=19700101010000-19700101010100&playseek=0-60"));
 }
 
 void test_regex_metacharacters()
 {
-    SUITE("simplifyToRegex: unescaped regex metacharacters in match patterns");
+    SUITE("simplifyToRegex: regex metacharacters in match patterns stay literal");
 
-    // simplifyToRegex only escapes '/', so a perfectly natural config pattern
-    // such as "?playseek={number}" becomes the invalid regex "?playseek=(\d+)".
+    // A perfectly natural config pattern such as "?playseek={number}" has to be
+    // read as a literal '?' rather than compiled as the invalid regex
+    // "?playseek=(\d+)".
     set_templates(R"([{"action":"remove","match":"?playseek={number}"}])");
 
-    bool ok = true;
+    bool ok = false;
     std::string out = "SENTINEL";
     bool threw = false;
     try {
@@ -292,25 +300,108 @@ void test_regex_metacharacters()
     }
     // Whatever else happens, the std::regex_error must not escape rewrite_path.
     CHECK(!threw);
-    // ...and rtsp_url must not be left half-written when it bails out.
-    CHECK_EQ(out, std::string("SENTINEL"));
-    // The rule should have been treated as a literal '?' and the request should
-    // have succeeded; instead one bad rule fails the entire request.
-    XCHECK(ok, "simplifyToRegex does not escape regex metacharacters: a '?' in a match "
-               "pattern throws std::regex_error and rewrite_path fails the whole request");
-    XCHECK_EQ(out, std::string("rtsp://192.0.2.10/c&b=2"),
-              "same bug: '?' should be matched literally");
+    CHECK(ok);
+    CHECK_EQ(out, std::string("rtsp://192.0.2.10/c&b=2"));
 
-    // An unbalanced '(' is the same class of failure.
+    // An unbalanced '(' is no longer a broken regex either.
     set_templates(R"([{"action":"remove","match":"(live"}])");
-    out = "SENTINEL";
-    CHECK(!URLRewriter::rewrite_path("/tv/192.0.2.10/(live?x=1", out));
+    CHECK_EQ(rewrite("/tv/192.0.2.10/(live?x=1"), std::string("rtsp://192.0.2.10/?x=1"));
 
-    // '.' is silently treated as "any character" rather than a literal dot.
+    // '.' is a literal dot, so it no longer matches an arbitrary character.
     set_templates(R"([{"action":"replace","match":"id=1.2","replacement":"OK"}])");
-    std::string got = rewrite("/tv/192.0.2.10/c?id=1x2");
-    XCHECK_EQ(got, std::string("rtsp://192.0.2.10/c?id=1x2"),
-              "'.' in a match pattern is not escaped, so it matches any character");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?id=1x2"), std::string("rtsp://192.0.2.10/c?id=1x2"));
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?id=1.2"), std::string("rtsp://192.0.2.10/c?OK"));
+
+    // The rest of the metacharacter set behaves the same way.
+    set_templates(R"([{"action":"remove","match":"^a$b|c*d+e[f]g"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?^a$b|c*d+e[f]g&x=1"),
+             std::string("rtsp://192.0.2.10/c?&x=1"));
+
+    // Braces that do not spell one of the three documented placeholders are
+    // literal braces, not a regex repetition.
+    set_templates(R"([{"action":"remove","match":"{foo}"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/{foo}/x?a=1"), std::string("rtsp://192.0.2.10//x?a=1"));
+
+    // A backslash matches a backslash instead of starting an escape sequence.
+    set_templates(R"([{"action":"replace","match":"a\\d","replacement":"OK"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?a1&x=1"), std::string("rtsp://192.0.2.10/c?a1&x=1"));
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?a\\d&x=1"), std::string("rtsp://192.0.2.10/c?OK&x=1"));
+}
+
+void test_replacement_placeholders()
+{
+    SUITE("expandReplacement: placeholders inside the 'replacement' string");
+
+    // A placeholder in the replacement means the same as "$1".
+    set_templates(R"([{"action":"replace","match":"seek={number}","replacement":"S={number}"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?seek=1234"), std::string("rtsp://192.0.2.10/c?S=1234"));
+
+    // Binding is by ordinal, not by wildcard kind: the first placeholder in the
+    // replacement is $1 even when it names a different wildcard than the group
+    // that captured the text.
+    set_templates(R"([{"action":"replace","match":"a={number}-{word}","replacement":"x={word}/{number}"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?a=12-ab"), std::string("rtsp://192.0.2.10/c?x=12/ab"));
+
+    // Three placeholders bind to $1/$2/$3 in order.
+    set_templates(R"([{"action":"replace","match":"t={number}-{word}-{any};","replacement":"[{any}][{number}][{word}]"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?t=12-ab-xy;&z=1"),
+             std::string("rtsp://192.0.2.10/c?[12][ab][xy]&z=1"));
+
+    // $1/$2 keep working and may be mixed in; the ordinal is counted over
+    // placeholders only, so "{number}" below is still the first one, i.e. $1.
+    set_templates(R"([{"action":"replace","match":"p={number}-{number}","replacement":"[$2][{number}]"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?p=1-2"), std::string("rtsp://192.0.2.10/c?[2][1]"));
+
+    // Braces that are not a documented placeholder are copied verbatim.
+    set_templates(R"([{"action":"replace","match":"k={word}","replacement":"{foo}=$1"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?k=abc"), std::string("rtsp://192.0.2.10/c?{foo}=abc"));
+
+    // "remove" ignores the replacement field entirely.
+    set_templates(R"([{"action":"remove","match":"d={number}","replacement":"{number}"}])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?d=5&x=1"), std::string("rtsp://192.0.2.10/c?&x=1"));
+}
+
+void test_malformed_templates()
+{
+    SUITE("rewrite_path: an unusable template is skipped, not fatal");
+
+    // Since every non-placeholder character is escaped, a match pattern can no
+    // longer produce an invalid regex; what is still rejectable is a template
+    // with the wrong shape. One of those must not cost the request the rules
+    // that would have handled it.
+
+    // "replace" without a "replacement".
+    set_templates(R"([
+        {"action":"replace","match":"/iptv/import"},
+        {"action":"remove","match":"/{number}_Uni.sdp"}
+    ])");
+    bool ok = false;
+    CHECK_EQ(rewrite("/tv/192.0.2.10/iptv/import/1_Uni.sdp?a=1", ok),
+             std::string("rtsp://192.0.2.10/iptv/import?a=1"));
+    CHECK(ok);
+
+    // "timeshift" without a "shift_hours", and with a non-integer one.
+    set_templates(R"([
+        {"action":"timeshift","match":"t={number}-{number}"},
+        {"action":"timeshift","match":"t={number}-{number}","shift_hours":"8"},
+        {"action":"remove","match":"&drop=1"}
+    ])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/c?t=0-60&drop=1", ok), std::string("rtsp://192.0.2.10/c?t=0-60"));
+    CHECK(ok);
+
+    // Entries missing a string action/match, and entries that are not objects at
+    // all, are skipped instead of throwing.
+    set_templates(R"([
+        {"match":"/live/{number}"},
+        {"action":"remove"},
+        {"action":5,"match":"/live/{number}"},
+        {"action":"remove","match":7},
+        "not-an-object",
+        null,
+        {"action":"remove","match":"/live/{number}"}
+    ])");
+    CHECK_EQ(rewrite("/tv/192.0.2.10/live/7?x=1", ok), std::string("rtsp://192.0.2.10?x=1"));
+    CHECK(ok);
 }
 
 void test_shipped_config_chain()
@@ -336,18 +427,23 @@ void test_shipped_config_chain()
     CHECK_EQ(rewrite("/tv/192.0.2.10/iptv/import/1_Uni.sdp?a=1"),
              std::string("rtsp://192.0.2.10/iptv?a=1"));
 
-    // The playback chain should annotate both timestamps with "GMT" and then
-    // shift them by -8h. It does not: simplifyToRegex is applied to "match"
-    // only, so the "{number}" tokens in "replacement" are inserted literally
-    // and the following timeshift rule then finds no digits to shift.
+    // The playback chain annotates both timestamps with "GMT" and the timeshift
+    // rule that follows then shifts them by -8h.
     bool ok = false;
-    std::string got = rewrite("/tv/192.0.2.10/PLTV/c?tvdr=20240101120000-20240101130000", ok);
+    CHECK_EQ(rewrite("/tv/192.0.2.10/PLTV/c?tvdr=20240101120000-20240101130000", ok),
+             std::string("rtsp://192.0.2.10/PLTV/c?tvdr=20240101040000GMT-20240101050000GMT"));
     CHECK(ok);
-    CHECK_EQ(got, std::string("rtsp://192.0.2.10/PLTV/c?tvdr={number}GMT-{number}GMT"));
-    XCHECK_EQ(got, std::string("rtsp://192.0.2.10/PLTV/c?tvdr=20240101040000GMT-20240101050000GMT"),
-              "placeholders are never expanded in the 'replacement' field (only $1/$2 work), "
-              "so the shipped playback rewrite emits literal '{number}' and the timeshift "
-              "rule that follows it never matches");
+
+    // Same chain with epoch timestamps: 1704110400 == 2024-01-01T12:00:00Z.
+    CHECK_EQ(rewrite("/tv/192.0.2.10/PLTV/c?tvdr=1704110400-1704114000"),
+             std::string("rtsp://192.0.2.10/PLTV/c?tvdr=20240101040000GMT-20240101050000GMT"));
+
+    // All four rules firing on one URL.
+    CHECK_EQ(rewrite("/tv/192.0.2.10/iptv/import/PLTV/1_Uni.sdp?tvdr=20240101120000-20240101130000"),
+             std::string("rtsp://192.0.2.10/iptv/PLTV?tvdr=20240101040000GMT-20240101050000GMT"));
+
+    // A URL the playback rules do not apply to is still carried through.
+    CHECK_EQ(rewrite("/tv/192.0.2.10/PLTV/c?other=1"), std::string("rtsp://192.0.2.10/PLTV/c?other=1"));
 }
 
 } // namespace
@@ -362,6 +458,8 @@ int main()
     test_actions();
     test_timeshift();
     test_regex_metacharacters();
+    test_replacement_placeholders();
+    test_malformed_templates();
     test_shipped_config_chain();
 
     return tst::summary();

@@ -13,34 +13,83 @@ void URLRewriter::set_replace_templates(const nlohmann::json &templates)
     replaceTemplates = templates;
 }
 
+namespace
+{
+
+struct Placeholder
+{
+    const char *token;
+    size_t length;
+    const char *group;
+};
+
+// The documented wildcard vocabulary. Everything else in a match pattern is a
+// literal, so it has to be escaped before it reaches std::regex.
+constexpr Placeholder kPlaceholders[] = {
+    {"{number}", 8, "(\\d+)"},
+    {"{word}", 6, "(\\w+)"},
+    {"{any}", 5, "(.*?)"},
+};
+
+const Placeholder *placeholder_at(const std::string &s, size_t pos)
+{
+    for (const auto &ph : kPlaceholders) {
+        if (s.compare(pos, ph.length, ph.token) == 0)
+            return &ph;
+    }
+    return nullptr;
+}
+
+} // namespace
+
 std::string URLRewriter::simplifyToRegex(const std::string &match_pattern)
 {
-    std::string regex_pattern = match_pattern;
+    // Match patterns describe URL query strings, which are full of regex
+    // metacharacters ('?', '.', '+', '('). Escaping everything that is not a
+    // placeholder keeps a natural pattern like "?playseek={number}" from
+    // compiling to an invalid regex.
+    static const std::string metacharacters = "\\^$.|?*+()[]{}";
+
+    std::string regex_pattern;
+    regex_pattern.reserve(match_pattern.size() * 2);
+
     size_t pos = 0;
-    // Each erase length must equal the placeholder's own length and each
-    // advance must equal the replacement's length (5), otherwise the character
-    // after the placeholder is swallowed and an immediately adjacent
-    // placeholder is skipped.
-    while ((pos = regex_pattern.find("{number}", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 8, "(\\d+)");
-        pos += 5;
-    }
-    pos = 0;
-    while ((pos = regex_pattern.find("{word}", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 6, "(\\w+)");
-        pos += 5;
-    }
-    pos = 0;
-    while ((pos = regex_pattern.find("{any}", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 5, "(.*?)");
-        pos += 5;
-    }
-    pos = 0;
-    while ((pos = regex_pattern.find("/", pos)) != std::string::npos) {
-        regex_pattern.replace(pos, 1, "\\/");
-        pos += 2;
+    while (pos < match_pattern.size()) {
+        if (const Placeholder *ph = placeholder_at(match_pattern, pos)) {
+            regex_pattern += ph->group;
+            pos += ph->length;
+            continue;
+        }
+        char c = match_pattern[pos++];
+        if (metacharacters.find(c) != std::string::npos)
+            regex_pattern += '\\';
+        regex_pattern += c;
     }
     return regex_pattern;
+}
+
+std::string URLRewriter::expandReplacement(const std::string &replacement)
+{
+    // std::regex_replace only understands $1/$2 backreferences, but the
+    // documented wildcard syntax is {number}/{word}/{any}, and that is what the
+    // shipped config.json writes in its replacement strings. Bind each
+    // placeholder to the capture group at the same ordinal so both spellings
+    // work.
+    std::string expanded;
+    expanded.reserve(replacement.size());
+
+    int group = 0;
+    size_t pos = 0;
+    while (pos < replacement.size()) {
+        if (const Placeholder *ph = placeholder_at(replacement, pos)) {
+            expanded += '$';
+            expanded += std::to_string(++group);
+            pos += ph->length;
+            continue;
+        }
+        expanded += replacement[pos++];
+    }
+    return expanded;
 }
 
 std::string URLRewriter::shiftTime(const std::string &time_str, int shift_hours)
@@ -84,6 +133,13 @@ bool URLRewriter::rewrite_path(const std::string &url, std::string &rtsp_url)
     // Apply templates for TV URLs (playback links usually have query params)
     if (is_tv && url.find('?') != std::string::npos) {
         for (const auto &template_obj : replaceTemplates) {
+            if (!template_obj.is_object() ||
+                !template_obj.contains("action") || !template_obj["action"].is_string() ||
+                !template_obj.contains("match") || !template_obj["match"].is_string()) {
+                Logger::warn("[REWRITE] Skipping template without a string action/match");
+                continue;
+            }
+
             std::string action = template_obj["action"];
             std::string match_pattern = template_obj["match"];
             std::string regex_pattern = simplifyToRegex(match_pattern);
@@ -92,29 +148,36 @@ bool URLRewriter::rewrite_path(const std::string &url, std::string &rtsp_url)
                 if (action == "remove") {
                     processed_url = std::regex_replace(processed_url, rgx, "");
                 } else if (action == "replace") {
-                    std::string replacement = template_obj["replacement"];
+                    if (!template_obj.contains("replacement") || !template_obj["replacement"].is_string()) {
+                        Logger::warn("[REWRITE] Skipping replace template without a replacement: " + match_pattern);
+                        continue;
+                    }
+                    std::string replacement = expandReplacement(template_obj["replacement"]);
                     processed_url = std::regex_replace(processed_url, rgx, replacement);
                 } else if (action == "timeshift") {
+                    if (!template_obj.contains("shift_hours") || !template_obj["shift_hours"].is_number_integer()) {
+                        Logger::warn("[REWRITE] Skipping timeshift template without shift_hours: " + match_pattern);
+                        continue;
+                    }
                     int shift_hours = template_obj["shift_hours"];
                     std::smatch match;
                     if (std::regex_search(processed_url, match, rgx) && match.size() >= 3) {
-                        std::string start_time = match[1];
-                        std::string end_time = match[2];
-                        std::string new_start = shiftTime(start_time, shift_hours);
-                        std::string new_end = shiftTime(end_time, shift_hours);
-                        
-                        std::string full_match = match[0];
-                        size_t pos1 = full_match.find(start_time);
-                        if (pos1 != std::string::npos) full_match.replace(pos1, start_time.length(), new_start);
-                        size_t pos2 = full_match.find(end_time, pos1 + new_start.length());
-                        if (pos2 != std::string::npos) full_match.replace(pos2, end_time.length(), new_end);
-                        
-                        processed_url.replace(match.position(0), match.length(0), full_match);
+                        std::string new_start = shiftTime(match[1].str(), shift_hours);
+                        std::string new_end = shiftTime(match[2].str(), shift_hours);
+
+                        // Splice by capture-group offset rather than by searching
+                        // for the timestamp text, which would also hit a digit
+                        // belonging to the pattern's own literal part. The later
+                        // group goes first so the earlier edit cannot shift the
+                        // offset that is still needed.
+                        processed_url.replace(match.position(2), match.length(2), new_end);
+                        processed_url.replace(match.position(1), match.length(1), new_start);
                     }
                 }
             } catch (const std::regex_error &e) {
-                Logger::error(std::string("Regex error: ") + e.what());
-                return false;
+                // One malformed rule must not fail the whole request.
+                Logger::error("[REWRITE] Skipping template '" + match_pattern + "': " + e.what());
+                continue;
             }
         }
     }
