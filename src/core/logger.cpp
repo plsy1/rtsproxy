@@ -4,6 +4,9 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 LogLevel Logger::currentLevel = LogLevel::INFO;
@@ -13,6 +16,38 @@ std::string Logger::logFilePath;
 size_t Logger::maxLogLines = 10000; // Default 10000 lines
 size_t Logger::currentLogLines = 0;
 std::deque<std::string> Logger::logBuffer;
+int Logger::emergencyFd = -1;
+
+void Logger::emergency(const char *msg)
+{
+    if (msg == nullptr)
+        return;
+
+    size_t len = 0;
+    while (msg[len] != '\0')
+        ++len;
+
+    const int targets[2] = {emergencyFd, STDERR_FILENO};
+    for (int fd : targets)
+    {
+        if (fd < 0)
+            continue;
+
+        size_t written = 0;
+        while (written < len)
+        {
+            ssize_t n = write(fd, msg + written, len - written);
+            if (n > 0)
+            {
+                written += static_cast<size_t>(n);
+                continue;
+            }
+            if (n < 0 && errno == EINTR)
+                continue;
+            break; // Nothing useful left to do inside a signal handler.
+        }
+    }
+}
 
 void Logger::setLogLevel(LogLevel level)
 {
@@ -35,7 +70,12 @@ void Logger::setLogFile(const std::string &path, size_t maxLines)
     if (logFile.is_open()) {
         logFile.close();
     }
-    
+
+    if (emergencyFd >= 0) {
+        close(emergencyFd);
+        emergencyFd = -1;
+    }
+
     if (!path.empty()) {
         size_t last_slash = path.find_last_of("/");
         if (last_slash != std::string::npos) {
@@ -52,6 +92,11 @@ void Logger::setLogFile(const std::string &path, size_t maxLines)
         if (!logFile.is_open()) {
             std::cerr << "[LOGGER] Failed to open log file: " << path << std::endl;
         }
+
+        // A second, raw handle on the same file. O_APPEND makes each write
+        // land at the end regardless of what the ofstream has buffered, and
+        // it is the only way to record anything from a signal handler.
+        emergencyFd = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     }
 }
 

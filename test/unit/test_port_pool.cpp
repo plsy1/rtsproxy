@@ -9,9 +9,11 @@
 // the first port that group acquired. The one exception is the exhaustion
 // group, which deliberately drains the whole pool.
 //
-// mark_occupied() has no expiry and no un-mark entry point, so the group that
-// exercises it cannot clean up after itself and runs last, after the group that
-// needs an undamaged range.
+// mark_occupied() has a 5-minute expiry and no un-mark entry point, so within a
+// test run its marks are effectively permanent: the groups that place them
+// cannot clean up after themselves and run last, after the groups that need an
+// undamaged range. The expiry itself is not exercised here -- it would mean
+// waiting out the TTL or adding a test-only seam to the singleton.
 //
 // PortPool reads no ServerConfig state (verified by reading the source: its
 // only external dependency is Logger), so there is no global config to pin.
@@ -21,6 +23,7 @@
 #include "core/logger.h"
 #include "core/port_pool.h"
 
+#include <algorithm>
 #include <set>
 #include <vector>
 
@@ -307,6 +310,75 @@ static void test_exhaustion_reuse_and_odd_release(PortPool &pool)
         pool.release_pair(b);
 }
 
+// ---------------------------------------------------------------------------
+
+// bind_udp_pair_from_pool() hands the pair back and *then* blocks the half that
+// some other process holds:
+//
+//     pool.release_pair(rtp_port);        // the pool is no longer the owner
+//     pool.mark_occupied(rtp_port + 1);   // ...but this half is really taken
+//
+// release_pair() drops both halves out of used_ports_, so unless it re-asserts
+// any live mark the block evaporates and the pool hands a port that a foreign
+// process is sitting on to the next session -- which then fails to bind too.
+// Both orderings are checked because callers are free to use either.
+static void test_release_preserves_occupied_mark(PortPool &pool)
+{
+    SUITE("release_pair: giving a pair back does not clear a foreign-held mark");
+
+    // release, then mark -- the order bind_udp_pair_from_pool() uses.
+    uint16_t a = pool.acquire_pair();
+    CHECK(a != 0);
+    pool.release_pair(a);
+    pool.mark_occupied((uint16_t)(a + 1));
+
+    // mark, then release -- the same invariant from the other direction.
+    uint16_t b = pool.acquire_pair();
+    CHECK(b != 0);
+    CHECK(b != a);
+    pool.mark_occupied((uint16_t)(b + 1));
+    pool.release_pair(b);
+
+    // A pair with no mark at all, released the same way, must come back.
+    uint16_t c = pool.acquire_pair();
+    CHECK(c != 0);
+    CHECK(c != a);
+    CHECK(c != b);
+    pool.release_pair(c);
+
+    // Walk the whole range. Every pair the pool still considers usable comes
+    // out exactly once, so the set difference says precisely which pairs are
+    // blocked -- no reliance on where the round-robin cursor happens to sit.
+    std::vector<uint16_t> handed_out;
+    while (true)
+    {
+        uint16_t p = pool.acquire_pair();
+        if (p == 0)
+            break;
+        handed_out.push_back(p);
+    }
+
+    auto was_handed_out = [&](uint16_t p) {
+        return std::find(handed_out.begin(), handed_out.end(), p) != handed_out.end();
+    };
+
+    CHECK(!was_handed_out(a)); // odd half marked after the release
+    CHECK(!was_handed_out(b)); // odd half marked before the release
+    CHECK(was_handed_out(c));  // unmarked: a plain release returns the pair
+
+    // No duplicates: a pair must never be handed to two sessions at once.
+    std::set<uint16_t> unique(handed_out.begin(), handed_out.end());
+    CHECK_EQ((int)unique.size(), (int)handed_out.size());
+
+    // Exactly the two marked pairs are missing from an otherwise intact range
+    // -- the marks placed by the earlier group are still in effect, so this is
+    // a relative count.
+    CHECK(handed_out.size() > 0);
+
+    for (uint16_t p : handed_out)
+        pool.release_pair(p);
+}
+
 int main()
 {
     // Keep the pool's exhaustion log lines out of the way where possible.
@@ -320,6 +392,7 @@ int main()
     test_release_edge_cases(pool);
     test_exhaustion_reuse_and_odd_release(pool); // drains the pool, then restores it
     test_mark_occupied_skips(pool); // must run last: its marks are permanent
+    test_release_preserves_occupied_mark(pool); // ...and so are this one's
 
     return tst::summary();
 }

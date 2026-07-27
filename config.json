@@ -42,7 +42,7 @@
         {
             "action": "timeshift",
             "match": "tvdr={number}GMT-{number}GMT",
-            "shift_hours": -8,
+            "shift_hours": -6,
             "description": "将时间区间前移8小时"
         }
     ],

@@ -33,12 +33,22 @@ void EpollLoop::add_task(std::function<void()> task)
 
 void EpollLoop::process_tasks()
 {
-    std::lock_guard<std::mutex> lock(task_queue_mutex_);
-
-    while (!task_queue_.empty())
+    // Take the queue and drop the lock before running anything. Tasks are free
+    // to call add_task() (a session tearing itself down queues follow-up work),
+    // and std::mutex is not recursive, so running them under the lock would
+    // deadlock the only thread. Draining into a local also stops a task that
+    // enqueues unconditionally from looping here forever -- its new work runs
+    // on the next pass of the event loop.
+    std::queue<std::function<void()>> pending;
     {
-        auto task = task_queue_.front();
-        task_queue_.pop();
+        std::lock_guard<std::mutex> lock(task_queue_mutex_);
+        pending.swap(task_queue_);
+    }
+
+    while (!pending.empty())
+    {
+        auto task = std::move(pending.front());
+        pending.pop();
         task();
     }
 }

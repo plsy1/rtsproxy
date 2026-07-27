@@ -13,9 +13,33 @@ PortPool::PortPool()
     next_port_ = start_port_;
 }
 
+void PortPool::purge_expired_marks()
+{
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = occupied_marks_.begin(); it != occupied_marks_.end();)
+    {
+        if (now - it->second < kOccupiedTtl)
+        {
+            ++it;
+            continue;
+        }
+
+        // Never un-block a port that is now part of a live allocation: the mark
+        // and the allocation are independent, and dropping it from used_ports_
+        // here would let the pair be handed out a second time.
+        uint16_t base = static_cast<uint16_t>(it->first & ~1u);
+        if (allocated_bases_.find(base) == allocated_bases_.end())
+            used_ports_.erase(it->first);
+
+        it = occupied_marks_.erase(it);
+    }
+}
+
 uint16_t PortPool::acquire_pair()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    purge_expired_marks();
 
     uint16_t attempts = 0;
     uint16_t total_ports = end_port_ - start_port_;
@@ -74,13 +98,27 @@ void PortPool::release_pair(uint16_t port)
     // port is even here, so port + 1 cannot exceed UINT16_MAX and wrap to 0.
     used_ports_.erase(port);
     used_ports_.erase(static_cast<uint16_t>(port + 1));
+
+    // A half of this pair may also be blocked because a foreign process holds
+    // it. Releasing the allocation must not silently clear that block.
+    auto now = std::chrono::steady_clock::now();
+    for (uint16_t p : {port, static_cast<uint16_t>(port + 1)})
+    {
+        auto it = occupied_marks_.find(p);
+        if (it == occupied_marks_.end())
+            continue;
+        if (now - it->second < kOccupiedTtl)
+            used_ports_.insert(p);
+        else
+            occupied_marks_.erase(it);
+    }
 }
 
 void PortPool::mark_occupied(uint16_t port)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     used_ports_.insert(port);
-    // We don't automatically release it, but it will be skipped.
-    // In a real system, we might want a timer to clear these, 
-    // but for now, we just skip it to avoid immediate re-collision.
+    // Re-stamping on every failed bind keeps a port that is still genuinely
+    // taken blocked, while one that was only briefly busy ages out.
+    occupied_marks_[port] = std::chrono::steady_clock::now();
 }

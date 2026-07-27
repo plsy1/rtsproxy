@@ -673,7 +673,7 @@ void RTSPToRtspClient::handle_rtp_from_upstream(uint32_t /*events*/)
         {
             std::string wan_ip;
             uint16_t wan_port = 0;
-            if (StunClient::extract_stun_mapping_from_response(buf.get(), n, wan_ip, wan_port) == 0)
+            if (StunClient::extract_stun_mapping_from_response(rtp_us_fd_, buf.get(), n, wan_ip, wan_port) == 0)
             {
                 nat_wan_port_us_ = wan_port;
                 Logger::debug("[MITM] STUN mapped public port for RTP: " + std::to_string(nat_wan_port_us_));
@@ -1094,7 +1094,14 @@ void RTSPToRtspClient::on_downstream_readable()
         req = rewrite_request_for_upstream(req);
 
         to_upstream_q_.push_back(req);
-        loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+        // finish_upstream_connection() can retire the upstream socket while the
+        // session stays alive, and it leaves upstream_fd_ at -1. Arming epoll on
+        // -1 only earns an EBADF in the log, so mirror the guard handle_timer()
+        // already has and drop the request instead.
+        if (upstream_fd_ >= 0)
+            loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+        else
+            Logger::warn("[MITM] Upstream socket is gone, dropping queued request");
     }
 }
 
@@ -1591,7 +1598,10 @@ void RTSPToRtspClient::process_pending_setup()
     req = rewrite_request_for_upstream(req);
 
     to_upstream_q_.push_back(req);
-    loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+    if (upstream_fd_ >= 0)
+        loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+    else
+        Logger::warn("[MITM] Upstream socket is gone, dropping pending SETUP");
 }
 
 json RTSPToRtspClient::get_info() const

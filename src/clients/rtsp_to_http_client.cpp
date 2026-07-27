@@ -492,7 +492,7 @@ void RTSPToHttpClient::on_rtp_readable()
     {
         if (ServerConfig::isNatEnabled() == true)
         {
-            if (StunClient::extract_stun_mapping_from_response(buf.get(), recv_len, nat_wan_ip, nat_wan_port) == 0)
+            if (StunClient::extract_stun_mapping_from_response(rtp_fd_, buf.get(), recv_len, nat_wan_ip, nat_wan_port) == 0)
             {
                 Logger::debug("[RTP] Extract STUN mapping success: " + nat_wan_ip + ":" + std::to_string(nat_wan_port));
             };

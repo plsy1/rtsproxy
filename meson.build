@@ -81,6 +81,7 @@ if get_option('tests')
         'rtp_pipeline',
         'port_pool',
         'server_config',
+        'stun_client',
     ]
 
     foreach name : test_names

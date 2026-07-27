@@ -7,7 +7,11 @@ class StunClient
 {
 public:
     static int send_stun_mapping_request(int s);
-    static int extract_stun_mapping_from_response(unsigned char *rsp, size_t rsp_len, std::string &out_pub_ip, uint16_t &out_pub_port);
+
+    // `s` is the socket the request went out on. The response is only accepted
+    // if it carries the transaction ID that was sent on that same socket, so
+    // the caller must pass the fd rather than just the received bytes.
+    static int extract_stun_mapping_from_response(int s, unsigned char *rsp, size_t rsp_len, std::string &out_pub_ip, uint16_t &out_pub_port);
 private:
     static void gen_tid(unsigned char tid[12]);
     static void put16(unsigned char *p, uint16_t v);
