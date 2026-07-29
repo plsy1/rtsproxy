@@ -33,6 +33,7 @@ public:
     static int parse_url(const std::string &url, rtspCtx &ctx);
     static int get_content_length(const std::string &resp);
     static std::string extract_header_value(const std::string &msg, const std::string &header_name);
+    static std::string replace_request_uri(const std::string &request, const std::string &uri);
 
 private:
 };

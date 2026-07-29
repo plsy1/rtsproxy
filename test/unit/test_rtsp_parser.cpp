@@ -151,6 +151,28 @@ void test_extract_header_value()
     CHECK_EQ(rtspParser::extract_header_value(lf_only, "Session"), std::string(""));
 }
 
+void test_replace_request_uri()
+{
+    SUITE("replace_request_uri");
+
+    const std::string request =
+        "DESCRIBE rtsp://proxy.example/old/path?old=1 RTSP/1.0\r\n"
+        "CSeq: 7\r\n"
+        "Accept: application/sdp\r\n\r\n";
+    const std::string location =
+        "rtsp://124.132.240.33:554/live/ch.sdp?playtype=1&time=20260730055417+08"
+        "&profilecode=&AuthInfo=XpUHKW8KQXs8yP0uyna3%2Bu8XDxkg%3D%3D";
+
+    CHECK_EQ(rtspParser::replace_request_uri(request, location),
+             "DESCRIBE " + location + " RTSP/1.0\r\n"
+             "CSeq: 7\r\n"
+             "Accept: application/sdp\r\n\r\n");
+
+    // Malformed/incomplete messages are left untouched.
+    CHECK_EQ(rtspParser::replace_request_uri("DESCRIBE /x", location),
+             std::string("DESCRIBE /x"));
+}
+
 // ------------------------------------------------------------ Content-Length
 
 void test_get_content_length()
@@ -646,6 +668,7 @@ int main()
 
     test_parse_status_code();
     test_extract_header_value();
+    test_replace_request_uri();
     test_get_content_length();
     test_parse_session_id();
     test_parse_server_ports();

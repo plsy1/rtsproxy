@@ -340,3 +340,22 @@ std::string rtspParser::extract_header_value(const std::string &msg, const std::
         return msg.substr(pos);
     return msg.substr(pos, end - pos);
 }
+
+std::string rtspParser::replace_request_uri(const std::string &request, const std::string &uri)
+{
+    size_t line_end = request.find("\r\n");
+    if (line_end == std::string::npos)
+        return request;
+
+    size_t method_end = request.find(' ');
+    if (method_end == std::string::npos || method_end >= line_end)
+        return request;
+
+    size_t version_start = request.find(' ', method_end + 1);
+    if (version_start == std::string::npos || version_start >= line_end)
+        return request;
+
+    std::string result = request;
+    result.replace(method_end + 1, version_start - method_end - 1, uri);
+    return result;
+}

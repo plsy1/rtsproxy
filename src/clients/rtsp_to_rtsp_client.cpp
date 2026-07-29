@@ -1366,8 +1366,12 @@ void RTSPToRtspClient::on_upstream_readable()
             to_upstream_q_.clear();
             upstream_send_offset_ = 0;
 
-            // Rewrite the original downstream request to point to the new upstream URL
-            std::string rewritten_req = rewrite_request_for_upstream(last_downstream_req_);
+            // Retry the same method and headers against the complete redirect
+            // Location.  Reusing rewrite_request_for_upstream() here only
+            // changed the authority and accidentally retained the old path,
+            // dropping any path/query supplied by the 301/302 response.
+            std::string rewritten_req =
+                rtspParser::replace_request_uri(last_downstream_req_, ctx_.rtsp_url);
             to_upstream_q_.push_back(rewritten_req);
 
             // Connect to the new upstream server
