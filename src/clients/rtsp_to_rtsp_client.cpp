@@ -49,6 +49,20 @@ bool parse_content_length(const std::string &headers, size_t &body_len)
         return false;
     }
 }
+
+std::string add_authorization_if_missing(const std::string &request,
+                                         const std::string &authorization)
+{
+    if (authorization.empty() ||
+        !rtspParser::extract_header_value(request, "Authorization").empty())
+        return request;
+    size_t header_end = request.find("\r\n\r\n");
+    if (header_end == std::string::npos)
+        return request;
+    std::string result = request;
+    result.insert(header_end, "\r\nAuthorization: " + authorization);
+    return result;
+}
 }
 
 
@@ -105,6 +119,7 @@ RTSPToRtspClient::RTSPToRtspClient(EpollLoop *loop, BufferPool &pool,
       ctx_(config.ctx),
       proxy_uri_prefix_(config.proxy_uri_prefix),
       upstream_uri_base_(config.upstream_uri_base),
+      basic_authorization_(config.basic_authorization),
       rtp_pipeline_(std::make_unique<RtpPipeline>())
 {
     // Remove the simple EPOLLIN watch that was set by the accept handler;
@@ -545,7 +560,7 @@ std::string RTSPToRtspClient::rewrite_request_for_upstream(const std::string &re
     // If no URI rewriting is needed (plain RTSP proxy / explicit-proxy mode)
     // just return the request as-is.
     if (proxy_uri_prefix_.empty())
-        return req;
+        return add_authorization_if_missing(req, basic_authorization_);
 
     // Rewrite only the first line: "METHOD <uri> RTSP/1.0\r\n"
     size_t crlf = req.find("\r\n");
@@ -587,7 +602,9 @@ std::string RTSPToRtspClient::rewrite_request_for_upstream(const std::string &re
         uri.replace(pos, 1, "");
     }
 
-    return method + " " + uri + " " + rtsp_ver + rest;
+    return add_authorization_if_missing(
+        method + " " + uri + " " + rtsp_ver + rest,
+        basic_authorization_);
 }
 
 /* ========================================================================= */
@@ -1353,6 +1370,7 @@ void RTSPToRtspClient::on_upstream_readable()
             ctx_.server_rtsp_port = temp_ctx.server_rtsp_port;
             ctx_.path = temp_ctx.path;
             ctx_.rtsp_url = temp_ctx.rtsp_url;
+            basic_authorization_ = temp_ctx.basic_authorization;
 
             // Rebuild upstream_uri_base_
             upstream_uri_base_ = "rtsp://" + ctx_.server_ip + ":" + std::to_string(ctx_.server_rtsp_port);
@@ -1372,6 +1390,8 @@ void RTSPToRtspClient::on_upstream_readable()
             // dropping any path/query supplied by the 301/302 response.
             std::string rewritten_req =
                 rtspParser::replace_request_uri(last_downstream_req_, ctx_.rtsp_url);
+            rewritten_req =
+                add_authorization_if_missing(rewritten_req, basic_authorization_);
             to_upstream_q_.push_back(rewritten_req);
 
             // Connect to the new upstream server
@@ -1647,17 +1667,37 @@ RtspMitmConfig RTSPToRtspClient::resolve_upstream(const std::string &first_reque
     config.ctx.rtsp_url = info.upstream_url;
     if (rtspParser::parse_url(info.upstream_url, config.ctx) != 0)
     {
-        throw std::runtime_error("Failed to parse resolved RTSP URL: " + info.upstream_url);
+        throw std::runtime_error("Failed to parse resolved RTSP URL.");
     }
+
+    config.basic_authorization = config.ctx.basic_authorization;
+    if (config.basic_authorization.empty())
+        config.basic_authorization =
+            rtspParser::basic_authorization_from_url(info.raw_uri);
 
     // Determine proxy_uri_prefix and upstream_uri_base for MITM
     // (We reuse the parsing result from RequestParser if available, 
     // but for now we reconstruct it or adjust based on the resolved ctx)
     
     // Default prefix logic
-    size_t path_pos = info.raw_uri.find(config.ctx.path);
-    if (path_pos != std::string::npos) {
-        config.proxy_uri_prefix = info.raw_uri.substr(0, path_pos);
+    size_t scheme_end = info.raw_uri.find("://");
+    size_t proxy_path = scheme_end == std::string::npos
+        ? 0
+        : info.raw_uri.find('/', scheme_end + 3);
+    if (proxy_path != std::string::npos)
+    {
+        size_t embedded_start = std::string::npos;
+        if (info.raw_uri.compare(proxy_path, 5, "/rtp/") == 0)
+            embedded_start = proxy_path + 5;
+        else if (info.raw_uri.compare(proxy_path, 4, "/tv/") == 0)
+            embedded_start = proxy_path + 4;
+        if (embedded_start != std::string::npos)
+        {
+            size_t embedded_path = info.raw_uri.find('/', embedded_start);
+            size_t prefix_end =
+                embedded_path == std::string::npos ? info.raw_uri.size() : embedded_path;
+            config.proxy_uri_prefix = info.raw_uri.substr(0, prefix_end);
+        }
     }
     config.upstream_uri_base = "rtsp://" + config.ctx.server_ip + ":" + std::to_string(config.ctx.server_rtsp_port);
 

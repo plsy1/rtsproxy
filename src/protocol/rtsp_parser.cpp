@@ -10,6 +10,82 @@
 #include <limits>
 #include <arpa/inet.h>
 
+namespace
+{
+std::string percent_decode(const std::string &value)
+{
+    std::string result;
+    result.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        if (value[i] == '%' && i + 2 < value.size() &&
+            std::isxdigit(static_cast<unsigned char>(value[i + 1])) &&
+            std::isxdigit(static_cast<unsigned char>(value[i + 2])))
+        {
+            auto hex = [](char c) {
+                if (c >= '0' && c <= '9') return c - '0';
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                return c - 'a' + 10;
+            };
+            result.push_back(static_cast<char>((hex(value[i + 1]) << 4) | hex(value[i + 2])));
+            i += 2;
+        }
+        else
+        {
+            result.push_back(value[i]);
+        }
+    }
+    return result;
+}
+
+std::string base64_encode(const std::string &value)
+{
+    static constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string result;
+    result.reserve(((value.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < value.size(); i += 3)
+    {
+        unsigned int chunk = static_cast<unsigned char>(value[i]) << 16;
+        if (i + 1 < value.size())
+            chunk |= static_cast<unsigned char>(value[i + 1]) << 8;
+        if (i + 2 < value.size())
+            chunk |= static_cast<unsigned char>(value[i + 2]);
+        result.push_back(alphabet[(chunk >> 18) & 0x3f]);
+        result.push_back(alphabet[(chunk >> 12) & 0x3f]);
+        result.push_back(i + 1 < value.size() ? alphabet[(chunk >> 6) & 0x3f] : '=');
+        result.push_back(i + 2 < value.size() ? alphabet[chunk & 0x3f] : '=');
+    }
+    return result;
+}
+
+bool split_url_authority(const std::string &url, size_t &authority_end,
+                         std::string &hostport, std::string &userinfo)
+{
+    if (url.rfind("rtsp://", 0) != 0)
+        return false;
+    authority_end = url.find('/', 7);
+    size_t query = url.find('?', 7);
+    if (authority_end == std::string::npos ||
+        (query != std::string::npos && query < authority_end))
+        authority_end = query;
+    std::string authority =
+        url.substr(7, authority_end == std::string::npos ? std::string::npos : authority_end - 7);
+    size_t at = authority.rfind('@');
+    if (at != std::string::npos)
+    {
+        userinfo = authority.substr(0, at);
+        hostport = authority.substr(at + 1);
+    }
+    else
+    {
+        userinfo.clear();
+        hostport = authority;
+    }
+    return !hostport.empty();
+}
+}
+
 rtspParser::rtspParser() {}
 rtspParser::~rtspParser() {}
 
@@ -263,15 +339,31 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     }
 
     ctx.rtsp_url = clean_url;
+    ctx.basic_authorization.clear();
     if (clean_url.rfind("rtsp://", 0) != 0)
         return -1;
 
-    size_t slash = clean_url.find('/', 7);
-    std::string hostport = clean_url.substr(7, (slash == std::string::npos) ? std::string::npos : slash - 7);
-    if (hostport.empty())
-    {
+    size_t authority_end = std::string::npos;
+    std::string hostport;
+    std::string userinfo;
+    if (!split_url_authority(clean_url, authority_end, hostport, userinfo))
         return -1;
+
+    if (!userinfo.empty())
+    {
+        size_t credential_colon = userinfo.find(':');
+        if (credential_colon == std::string::npos)
+            return -1;
+        std::string credentials =
+            percent_decode(userinfo.substr(0, credential_colon)) + ":" +
+            percent_decode(userinfo.substr(credential_colon + 1));
+        ctx.basic_authorization = "Basic " + base64_encode(credentials);
+        clean_url = "rtsp://" + hostport +
+                    (authority_end == std::string::npos ? "" : clean_url.substr(authority_end));
+        ctx.rtsp_url = clean_url;
     }
+
+    size_t slash = clean_url.find('/', 7);
     size_t colon = hostport.find(':');
 
     try
@@ -312,6 +404,22 @@ int rtspParser::parse_url(const std::string &url, rtspCtx &ctx)
     ctx.path = (slash != std::string::npos) ? clean_url.substr(slash) : "/";
 
     return 0;
+}
+
+std::string rtspParser::basic_authorization_from_url(const std::string &url)
+{
+    size_t authority_end = std::string::npos;
+    std::string hostport;
+    std::string userinfo;
+    if (!split_url_authority(url, authority_end, hostport, userinfo) || userinfo.empty())
+        return "";
+    size_t colon = userinfo.find(':');
+    if (colon == std::string::npos)
+        return "";
+    std::string credentials =
+        percent_decode(userinfo.substr(0, colon)) + ":" +
+        percent_decode(userinfo.substr(colon + 1));
+    return "Basic " + base64_encode(credentials);
 }
 
 std::string rtspParser::extract_header_value(const std::string &msg, const std::string &header_name)
