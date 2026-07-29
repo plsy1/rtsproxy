@@ -313,10 +313,32 @@ std::string RTSPToRtspClient::patch_response_for_client(const std::string &resp)
         // Parse server_port from upstream response and remember it.
         std::regex sp_re(R"(server_port=(\d+)-(\d+))");
         std::smatch sm;
+        uint16_t srv_rtp = 0, srv_rtcp = 0;
+        bool have_server_ports = false;
         if (std::regex_search(transport, sm, sp_re))
         {
-            uint16_t srv_rtp = static_cast<uint16_t>(std::stoi(sm[1]));
-            uint16_t srv_rtcp = static_cast<uint16_t>(std::stoi(sm[2]));
+            try
+            {
+                int parsed_rtp = std::stoi(sm[1]);
+                int parsed_rtcp = std::stoi(sm[2]);
+                if (parsed_rtp >= 1 && parsed_rtp <= 65535 &&
+                    parsed_rtcp >= 1 && parsed_rtcp <= 65535)
+                {
+                    srv_rtp = static_cast<uint16_t>(parsed_rtp);
+                    srv_rtcp = static_cast<uint16_t>(parsed_rtcp);
+                    have_server_ports = true;
+                }
+            }
+            catch (...)
+            {
+            }
+
+            if (!have_server_ports)
+                Logger::warn("[MITM] Ignoring invalid server_port in upstream Transport: " + transport);
+        }
+
+        if (have_server_ports)
+        {
             std::string rtp_source = ctx_.server_ip;
             std::regex source_re(R"(source=([0-9.]+))");
             std::smatch source_match;
@@ -651,7 +673,7 @@ void RTSPToRtspClient::handle_rtp_from_upstream(uint32_t /*events*/)
         {
             std::string wan_ip;
             uint16_t wan_port = 0;
-            if (StunClient::extract_stun_mapping_from_response(buf.get(), n, wan_ip, wan_port) == 0)
+            if (StunClient::extract_stun_mapping_from_response(rtp_us_fd_, buf.get(), n, wan_ip, wan_port) == 0)
             {
                 nat_wan_port_us_ = wan_port;
                 Logger::debug("[MITM] STUN mapped public port for RTP: " + std::to_string(nat_wan_port_us_));
@@ -1072,7 +1094,14 @@ void RTSPToRtspClient::on_downstream_readable()
         req = rewrite_request_for_upstream(req);
 
         to_upstream_q_.push_back(req);
-        loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+        // finish_upstream_connection() can retire the upstream socket while the
+        // session stays alive, and it leaves upstream_fd_ at -1. Arming epoll on
+        // -1 only earns an EBADF in the log, so mirror the guard handle_timer()
+        // already has and drop the request instead.
+        if (upstream_fd_ >= 0)
+            loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+        else
+            Logger::warn("[MITM] Upstream socket is gone, dropping queued request");
     }
 }
 
@@ -1337,8 +1366,12 @@ void RTSPToRtspClient::on_upstream_readable()
             to_upstream_q_.clear();
             upstream_send_offset_ = 0;
 
-            // Rewrite the original downstream request to point to the new upstream URL
-            std::string rewritten_req = rewrite_request_for_upstream(last_downstream_req_);
+            // Retry the same method and headers against the complete redirect
+            // Location.  Reusing rewrite_request_for_upstream() here only
+            // changed the authority and accidentally retained the old path,
+            // dropping any path/query supplied by the 301/302 response.
+            std::string rewritten_req =
+                rtspParser::replace_request_uri(last_downstream_req_, ctx_.rtsp_url);
             to_upstream_q_.push_back(rewritten_req);
 
             // Connect to the new upstream server
@@ -1569,7 +1602,10 @@ void RTSPToRtspClient::process_pending_setup()
     req = rewrite_request_for_upstream(req);
 
     to_upstream_q_.push_back(req);
-    loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+    if (upstream_fd_ >= 0)
+        loop_->set(upstream_ctx_.get(), upstream_fd_, EPOLLIN | EPOLLOUT);
+    else
+        Logger::warn("[MITM] Upstream socket is gone, dropping pending SETUP");
 }
 
 json RTSPToRtspClient::get_info() const

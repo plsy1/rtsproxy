@@ -209,12 +209,23 @@ int bind_udp_pair_from_pool(int &rtp_fd, int &rtcp_fd, uint16_t &rtp_port, const
             // RTCP failed, close RTP and mark port as occupied
             close(rtp_fd);
             rtp_fd = -1;
+            // Hand the pair back before blocking the half that some other
+            // process owns. mark_occupied() alone would leave the pool still
+            // counting this pair as allocated, so the pair would be lost for
+            // the lifetime of the process and a client that keeps hitting
+            // taken ports would drain the whole range.
+            pool.release_pair(rtp_port);
             pool.mark_occupied(rtp_port + 1);
         }
         else
         {
+            pool.release_pair(rtp_port);
             pool.mark_occupied(rtp_port);
         }
     }
+
+    // Nothing is bound and nothing is still held; make sure the caller cannot
+    // mistake the last attempted port for one it now owns.
+    rtp_port = 0;
     return -1;
 }

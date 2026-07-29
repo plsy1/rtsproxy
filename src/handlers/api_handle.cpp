@@ -124,6 +124,10 @@ bool ApiHandle::dispatch(int client_fd, const RequestInfo &info, EpollLoop *loop
             send_json_response(client_fd, response, loop);
             return true;
         }
+
+        std::string resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        send_response(loop, client_fd, std::move(resp));
+        return true;
     }
 
     if (is_admin)
@@ -144,8 +148,14 @@ void ApiHandle::serve_admin_file(int client_fd, const RequestInfo &info, EpollLo
 
     if (clean_path == "/admin")
     {
+        // Redirect from the raw URI so the token survives the hop
+        std::string query;
+        size_t raw_query_pos = info.raw_uri.find('?');
+        if (raw_query_pos != std::string::npos)
+            query = info.raw_uri.substr(raw_query_pos);
+
         std::string response = "HTTP/1.1 301 Moved Permanently\r\n"
-                               "Location: /admin/\r\n"
+                               "Location: /admin/" + query + "\r\n"
                                "Content-Length: 0\r\n"
                                "Connection: close\r\n"
                                "\r\n";
@@ -214,7 +224,6 @@ void ApiHandle::send_json_response(int client_fd, const json &j, EpollLoop *loop
     std::string header = "HTTP/1.1 200 OK\r\n"
                          "Content-Type: application/json\r\n"
                          "Content-Length: " + std::to_string(body.size()) + "\r\n"
-                         "Access-Control-Allow-Origin: *\r\n"
                          "Connection: close\r\n"
                          "\r\n";
     send_response(loop, client_fd, header + body);

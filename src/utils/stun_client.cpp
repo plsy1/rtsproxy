@@ -3,6 +3,9 @@
 #include <cstring>
 #include <ctime>
 #include <cstdint>
+#include <array>
+#include <map>
+#include <random>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -10,15 +13,39 @@
 #include <sys/time.h>
 
 #define STUN_MSG_BINDING_REQUEST 0x0001
+#define STUN_MSG_BINDING_SUCCESS 0x0101
 #define STUN_ATTR_XOR_MAPPED_ADDR 0x0020
 #define STUN_ATTR_MAPPED_ADDR 0x0001
 #define STUN_MAGIC_COOKIE 0x2112A442
 
+namespace
+{
+
+using TransactionId = std::array<unsigned char, 12>;
+
+// The transaction ID of the request still in flight on each socket. These are
+// media sockets that accept datagrams from anywhere, so without remembering
+// what was asked there is nothing to check an answer against. Bounded by the
+// descriptor high-water mark, and each entry is consumed by the first response
+// examined for that socket.
+std::map<int, TransactionId> &in_flight()
+{
+    static std::map<int, TransactionId> ids;
+    return ids;
+}
+
+} // namespace
+
 void StunClient::gen_tid(unsigned char tid[12])
 {
-    srand(static_cast<unsigned>(time(nullptr)) ^ reinterpret_cast<uintptr_t>(&tid));
+    // Seeded once. The previous code re-seeded srand() from time(nullptr) on
+    // every call, so two requests issued in the same second drew the identical
+    // transaction ID, which defeats the check that now depends on it.
+    static std::mt19937 gen(std::random_device{}());
+    static std::uniform_int_distribution<unsigned> dis(0, 255);
+
     for (int i = 0; i < 12; ++i)
-        tid[i] = rand() & 0xFF;
+        tid[i] = static_cast<unsigned char>(dis(gen));
 }
 
 void StunClient::put16(unsigned char *p, uint16_t v)
@@ -64,29 +91,47 @@ int StunClient::send_stun_mapping_request(int s)
     if (sent != static_cast<ssize_t>(sizeof(req)))
         return -1;
 
+    TransactionId expected;
+    std::memcpy(expected.data(), tid, expected.size());
+    in_flight()[s] = expected;
+
     return 0;
 }
 
-int StunClient::extract_stun_mapping_from_response(unsigned char *rsp, size_t rsp_len, std::string &out_pub_ip, uint16_t &out_pub_port)
+int StunClient::extract_stun_mapping_from_response(int s, unsigned char *rsp, size_t rsp_len, std::string &out_pub_ip, uint16_t &out_pub_port)
 {
+    // One request gets one answer. Consume the record up front so that a packet
+    // which fails any check below cannot be retried against, and so a socket
+    // that never sent a request has nothing to match.
+    auto it = in_flight().find(s);
+    if (it == in_flight().end())
+        return -1;
+    TransactionId expected = it->second;
+    in_flight().erase(it);
+
     if (rsp_len < 20)
         return -1;
 
+    uint16_t msg_type = ntohs(*(uint16_t *)(rsp + 0));
     uint16_t msg_len = ntohs(*(uint16_t *)(rsp + 2));
     uint32_t cookie = ntohl(*(uint32_t *)(rsp + 4));
+
+    // Anything that is not a Binding Success Response carries no mapping: an
+    // error response, or an echoed request, would otherwise be walked for
+    // attributes and could hand back an attacker-chosen address.
+    if (msg_type != STUN_MSG_BINDING_SUCCESS)
+        return -1;
     if (cookie != STUN_MAGIC_COOKIE)
         return -1;
-
-    // We assume transaction ID is correct
-    unsigned char tid[12];
-    std::memcpy(tid, rsp + 8, 12);
+    if (std::memcmp(rsp + 8, expected.data(), expected.size()) != 0)
+        return -1;
 
     size_t offset = 20;
     while (offset + 4 <= 20 + static_cast<size_t>(msg_len) && offset + 4 <= rsp_len)
     {
         uint16_t attr_type = ntohs(*(uint16_t *)(rsp + offset));
         uint16_t attr_len = ntohs(*(uint16_t *)(rsp + offset + 2));
-        uint16_t val_off = offset + 4;
+        size_t val_off = offset + 4;
         if (val_off + attr_len > rsp_len)
             break;
 

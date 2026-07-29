@@ -67,8 +67,17 @@ void ServerConfig::parseCommandLine(int argc, char *argv[])
         }
     }
 
-    // Load from file if exists
-    loadFromFile(getJsonPath());
+    // Load from file if exists. A file that is there but unusable stays fatal:
+    // starting up with the operator's auth token and blacklist silently missing
+    // would be worse than not starting at all. A file that is simply absent is
+    // not an error, the compiled-in defaults and the CLI options cover it.
+    {
+        std::ifstream probe(getJsonPath());
+        bool present = probe.is_open();
+        probe.close();
+        if (!loadFromFile(getJsonPath()) && present)
+            throw std::runtime_error("config file '" + getJsonPath() + "' was rejected, see the log for the offending setting");
+    }
 
     // Second pass to override with CLI options
     optind = 1; // Reset getopt
@@ -343,48 +352,123 @@ bool ServerConfig::loadFromFile(const std::string &path)
         return false;
     }
 
+    // Nothing below is committed to global state until the settings block has
+    // been applied in full, so a file rejected halfway leaves the process
+    // exactly as it was.
+    bool has_blacklist = false;
+    std::vector<std::string> bl;
     if (config.contains("blacklist") && config["blacklist"].is_array())
     {
-        std::vector<std::string> bl;
+        has_blacklist = true;
         for (const auto &item : config["blacklist"])
         {
             if (item.is_string()) bl.push_back(item.get<std::string>());
         }
-        setBlacklist(bl);
     }
 
     if (config.contains("settings") && config["settings"].is_object())
     {
         const auto& s = config["settings"];
-        if (s.contains("port")) setPort(s["port"].get<int>());
-        if (s.contains("nat_method")) setNatMethod(s["nat_method"].get<std::string>());
-        if (s.contains("enable_nat")) setNatEnabled(s["enable_nat"].get<bool>());
-        if (s.contains("buffer_pool_count")) setBufferPoolCount(s["buffer_pool_count"].get<int>());
-        if (s.contains("buffer_pool_block_size")) setBufferPoolBlockSize(s["buffer_pool_block_size"].get<int>());
-        if (s.contains("auth_token")) setToken(s["auth_token"].get<std::string>());
-        if (s.contains("log_file")) setLogFile(s["log_file"].get<std::string>());
-        if (s.contains("log_lines")) setLogLines(s["log_lines"].get<size_t>());
-        if (s.contains("log_level")) {
-            std::string level = s["log_level"].get<std::string>();
-            if (level == "error") Logger::setLogLevel(LogLevel::ERROR);
-            else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
-            else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
-            else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
+
+        // The setters double as the validators, so a bad key is only found
+        // after the keys before it have already been stored. Keep the previous
+        // values so they can be put back verbatim.
+        const int old_port = port;
+        const bool old_enable_nat = enable_nat;
+        const std::string old_nat_method = nat_method;
+        const int old_buffer_pool_count = buffer_pool_count;
+        const int old_buffer_pool_block_size = buffer_pool_block_size;
+        const int old_stun_server_port = stun_server_port;
+        const std::string old_stun_server_host = stun_server_host;
+        const std::string old_auth_token = auth_token;
+        const std::string old_http_upstream_interface = http_upstream_interface;
+        const std::string old_mitm_upstream_interface = mitm_upstream_interface;
+        const std::string old_listen_interface = listen_interface;
+        const std::string old_log_file_path = log_file_path;
+        const size_t old_log_file_lines = log_file_lines;
+        const LogLevel old_log_level = Logger::getLogLevel();
+        const bool old_strip_padding = strip_padding;
+        const bool old_wait_keyframe = wait_keyframe;
+        const bool old_watchdog_enabled = watchdog_enabled;
+        const bool old_daemon_enabled = daemon_enabled;
+
+        // Names the key currently being applied, so a failure can point the
+        // operator at the exact line of their config file.
+        std::string key;
+        try {
+            key = "port";                   if (s.contains(key)) setPort(s[key].get<int>());
+            key = "nat_method";             if (s.contains(key)) setNatMethod(s[key].get<std::string>());
+            key = "enable_nat";             if (s.contains(key)) setNatEnabled(s[key].get<bool>());
+            key = "buffer_pool_count";      if (s.contains(key)) setBufferPoolCount(s[key].get<int>());
+            key = "buffer_pool_block_size"; if (s.contains(key)) setBufferPoolBlockSize(s[key].get<int>());
+            key = "auth_token";             if (s.contains(key)) setToken(s[key].get<std::string>());
+            key = "log_file";               if (s.contains(key)) setLogFile(s[key].get<std::string>());
+            key = "log_lines";              if (s.contains(key)) setLogLines(s[key].get<size_t>());
+            key = "log_level";
+            if (s.contains(key)) {
+                std::string level = s[key].get<std::string>();
+                if (level == "error") Logger::setLogLevel(LogLevel::ERROR);
+                else if (level == "warn") Logger::setLogLevel(LogLevel::WARN);
+                else if (level == "info") Logger::setLogLevel(LogLevel::INFO);
+                else if (level == "debug") Logger::setLogLevel(LogLevel::DEBUG);
+            }
+            key = "strip_padding";          if (s.contains(key)) setStripPadding(s[key].get<bool>());
+            key = "wait_keyframe";          if (s.contains(key)) setWaitKeyframe(s[key].get<bool>());
+            key = "watchdog";               if (s.contains(key)) setWatchdogEnabled(s[key].get<bool>());
+            key = "daemon";                 if (s.contains(key)) setDaemonEnabled(s[key].get<bool>());
+            key = "http_interface";         if (s.contains(key)) setHttpUpstreamInterface(s[key].get<std::string>());
+            key = "mitm_interface";         if (s.contains(key)) setMitmUpstreamInterface(s[key].get<std::string>());
+            key = "listen_interface";       if (s.contains(key)) setListenInterface(s[key].get<std::string>());
+            key = "stun_host";              if (s.contains(key)) setStunHost(s[key].get<std::string>());
+            key = "stun_port";              if (s.contains(key)) setStunPort(s[key].get<int>());
+        } catch (const std::exception& e) {
+            port = old_port;
+            enable_nat = old_enable_nat;
+            nat_method = old_nat_method;
+            buffer_pool_count = old_buffer_pool_count;
+            buffer_pool_block_size = old_buffer_pool_block_size;
+            stun_server_port = old_stun_server_port;
+            stun_server_host = old_stun_server_host;
+            auth_token = old_auth_token;
+            http_upstream_interface = old_http_upstream_interface;
+            mitm_upstream_interface = old_mitm_upstream_interface;
+            listen_interface = old_listen_interface;
+            log_file_path = old_log_file_path;
+            log_file_lines = old_log_file_lines;
+            Logger::setLogLevel(old_log_level);
+            strip_padding = old_strip_padding;
+            wait_keyframe = old_wait_keyframe;
+            watchdog_enabled = old_watchdog_enabled;
+            daemon_enabled = old_daemon_enabled;
+            Logger::error("[CONFIG] Bad value for setting '" + key + "': " + std::string(e.what()));
+            return false;
         }
-        if (s.contains("strip_padding")) setStripPadding(s["strip_padding"].get<bool>());
-        if (s.contains("wait_keyframe")) setWaitKeyframe(s["wait_keyframe"].get<bool>());
-        if (s.contains("watchdog")) setWatchdogEnabled(s["watchdog"].get<bool>());
-        if (s.contains("daemon")) setDaemonEnabled(s["daemon"].get<bool>());
-        if (s.contains("http_interface")) setHttpUpstreamInterface(s["http_interface"].get<std::string>());
-        if (s.contains("mitm_interface")) setMitmUpstreamInterface(s["mitm_interface"].get<std::string>());
-        if (s.contains("listen_interface")) setListenInterface(s["listen_interface"].get<std::string>());
-        if (s.contains("stun_host")) setStunHost(s["stun_host"].get<std::string>());
-        if (s.contains("stun_port")) setStunPort(s["stun_port"].get<int>());
     }
+
+    if (has_blacklist) setBlacklist(bl);
 
     if (config.contains("replace_templates") && config["replace_templates"].is_array())
     {
-        URLRewriter::set_replace_templates(config["replace_templates"]);
+        // A rule without a string action/match can never fire, so drop it here
+        // rather than letting rewrite_path complain on every single request.
+        nlohmann::json templates = nlohmann::json::array();
+        size_t index = 0;
+        for (const auto &tpl : config["replace_templates"])
+        {
+            if (!tpl.is_object() ||
+                !tpl.contains("action") || !tpl["action"].is_string() ||
+                !tpl.contains("match") || !tpl["match"].is_string())
+            {
+                Logger::warn("[CONFIG] Ignoring replace_templates[" + std::to_string(index) +
+                             "]: needs a string 'action' and a string 'match'");
+            }
+            else
+            {
+                templates.push_back(tpl);
+            }
+            ++index;
+        }
+        URLRewriter::set_replace_templates(templates);
     }
 
     return true;

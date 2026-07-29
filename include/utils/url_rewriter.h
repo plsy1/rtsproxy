@@ -23,5 +23,6 @@ private:
     static std::vector<std::string> split(const std::string &str, char delimiter);
     static std::string join(const std::vector<std::string> &parts, const std::string &delimiter);
     static std::string simplifyToRegex(const std::string &match_pattern);
+    static std::string expandReplacement(const std::string &replacement);
     static std::string shiftTime(const std::string &time_str, int shift_hours);
 };
