@@ -6,11 +6,43 @@
 
 using json = nlohmann::json;
 
-nlohmann::json URLRewriter::replaceTemplates;
+nlohmann::json URLRewriter::replaceTemplates = {
+    {{"action", "remove"}, {"match", "/{number}_Uni.sdp"}},
+    {{"action", "replace"}, {"match", "/iptv/import"}, {"replacement", "/iptv"}},
+    {{"action", "replace"}, {"match", "tvdr={number}-{number}"},
+     {"replacement", "tvdr={number}GMT-{number}GMT"}},
+    {{"action", "timeshift"}, {"match", "tvdr={number}GMT-{number}GMT"},
+     {"shift_hours", -6}}
+};
 
 void URLRewriter::set_replace_templates(const nlohmann::json &templates)
 {
     replaceTemplates = templates;
+}
+
+void URLRewriter::clear_templates()
+{
+    replaceTemplates = nlohmann::json::array();
+}
+
+void URLRewriter::add_remove_rule(const std::string &match)
+{
+    if (!replaceTemplates.is_array()) clear_templates();
+    replaceTemplates.push_back({{"action", "remove"}, {"match", match}});
+}
+
+void URLRewriter::add_replace_rule(const std::string &match, const std::string &replacement)
+{
+    if (!replaceTemplates.is_array()) clear_templates();
+    replaceTemplates.push_back(
+        {{"action", "replace"}, {"match", match}, {"replacement", replacement}});
+}
+
+void URLRewriter::add_timeshift_rule(const std::string &match, int shift_hours)
+{
+    if (!replaceTemplates.is_array()) clear_templates();
+    replaceTemplates.push_back(
+        {{"action", "timeshift"}, {"match", match}, {"shift_hours", shift_hours}});
 }
 
 namespace
@@ -71,8 +103,7 @@ std::string URLRewriter::simplifyToRegex(const std::string &match_pattern)
 std::string URLRewriter::expandReplacement(const std::string &replacement)
 {
     // std::regex_replace only understands $1/$2 backreferences, but the
-    // documented wildcard syntax is {number}/{word}/{any}, and that is what the
-    // shipped config.json writes in its replacement strings. Bind each
+    // documented wildcard syntax is {number}/{word}/{any}. Bind each
     // placeholder to the capture group at the same ordinal so both spellings
     // work.
     std::string expanded;

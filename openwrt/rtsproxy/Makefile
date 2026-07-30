@@ -32,7 +32,6 @@ endef
 
 define Package/rtsproxy/conffiles
 /etc/config/rtsproxy
-/etc/rtsproxy/config.json
 endef
 
 define Package/rtsproxy/install
@@ -42,9 +41,6 @@ define Package/rtsproxy/install
 	$(INSTALL_BIN) files/rtsproxy.init $(1)/etc/init.d/rtsproxy
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) files/rtsproxy.config $(1)/etc/config/rtsproxy
-	$(INSTALL_DIR) $(1)/etc/rtsproxy
-	$(INSTALL_CONF) files/config.json $(1)/etc/rtsproxy/config.json
-	
 	$(INSTALL_DIR) $(1)/usr/share/rtsproxy/www
 	$(CP) $(PKG_BUILD_DIR)/webui/* $(1)/usr/share/rtsproxy/www/
 endef

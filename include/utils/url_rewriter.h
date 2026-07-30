@@ -11,6 +11,10 @@ public:
      * Set the rewriting templates (usually called once at startup).
      */
     static void set_replace_templates(const nlohmann::json &templates);
+    static void clear_templates();
+    static void add_remove_rule(const std::string &match);
+    static void add_replace_rule(const std::string &match, const std::string &replacement);
+    static void add_timeshift_rule(const std::string &match, int shift_hours);
 
     /**
      * Centralized entry point for rewriting /rtp/ or /tv/ paths into upstream RTSP URLs.

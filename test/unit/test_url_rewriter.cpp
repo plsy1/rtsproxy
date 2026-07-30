@@ -406,9 +406,9 @@ void test_malformed_templates()
 
 void test_shipped_config_chain()
 {
-    SUITE("replace_templates chain as shipped in config.json");
+    SUITE("default replace_templates chain");
 
-    // The four rules from config.json, verbatim (comments stripped).
+    // The four built-in rules.
     set_templates(R"([
         {"action":"remove","match":"/{number}_Uni.sdp"},
         {"action":"replace","match":"/iptv/import","replacement":"/iptv"},

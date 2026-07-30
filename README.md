@@ -74,11 +74,11 @@ Options:
   -s, --buffer-pool-block-size <size> 设置 BufferPool 块大小 (默认: 2048)
   -t, --auth-token      <token> 设置鉴权 Token (可选)
   -l, --listen-interface <iface> 设置服务监听网口 (下游)
+  -c, --config          <path>  从指定 TOML 文件读取配置
       --http-interface  <iface> 设置 HTTP 模式上游网口
       --mitm-interface  <iface> 设置 MITM 模式上游网口
       --stun-host       <host>  设置 STUN 服务器地址 (默认: stun.l.google.com)
       --stun-port       <port>  设置 STUN 服务器端口 (默认: 19302)
-  -c, --config          <path>  设置规则配置文件路径 (默认: config.json)
   -w, --watchdog                开启自动重启模式
   -d, --daemon                  后台运行
   -k, --kill                    杀死正在运行的实例
@@ -90,40 +90,53 @@ Options:
 
 > [!TIP]
 > **多网口绑定 (Multi-Interface Support)**：
-> 你可以通过 `--listen-interface` 指定服务在特定的本地网口（如 `br-lan`）监听，同时通过 `--http-interface` 或 `--mitm-interface` 指定上游拉流流量走不同的物理网口（如 `eth1` 专网），实现真正的内外网隔离。
+> 你可以通过 `--listen-interface` 指定服务监听的本地网口，并通过可重复的 `--upstream-route CIDR,iface` 按目标网段选择上游出口。多个网段同时匹配时使用最长前缀；未匹配时使用系统路由表。
 
 ---
 
-## 配置文件说明 (`config.json`)
+## 配置文件说明
 
-`config.json` 是 RTSProxy 的核心配置文件，支持全局参数、URL 重写规则及安全黑名单设置。
+独立部署可通过 `-c /path/config.toml` 显式读取 TOML；该模式以配置文件为唯一配置来源。未传 `-c` 时不会查找配置文件，只使用命令行参数和程序默认值。OpenWrt 使用原生 UCI 配置 `/etc/config/rtsproxy`，与 TOML 相互独立。两种方式都支持全局设置、CIDR 出口路由、黑名单和 URL 重写规则，不再支持 JSON 配置。
 
-### 1. 全局设置 (`settings`)
+TOML 示例：
 
-| 字段 | 类型 | 说明 | 默认值 |
-| :--- | :--- | :--- | :--- |
-| `port` | Number | 代理监听端口 | `8554` |
-| `enable_nat` | Boolean | 是否开启 NAT 穿越 | `false` |
-| `nat_method` | String | NAT 穿越模式 (`stun`, `zte`) | `stun` |
-| `buffer_pool_count` | Number | 预分配内存池块数量 | `8192` |
-| `buffer_pool_block_size` | Number | 每块内存的大小 (字节) | `2048` |
-| `log_level` | String | 日志等级 (`error`, `warn`, `info`, `debug`) | `info` |
-| `log_file` | String | 日志文件路径 (为空则输出至控制台) | `""` |
-| `log_lines` | Number | 日志文件最大滚动行数 | `10000` |
-| `strip_padding` | Boolean | 是否剥离 MPEG-TS 空包以节省带宽 | `false` |
-| `wait_keyframe` | Boolean | 是否等待关键帧后再开始转发 (防绿屏) | `false` |
-| `watchdog` | Boolean | 开启进程监控，崩溃后自动重启 | `false` |
-| `daemon` | Boolean | 是否以守护进程方式后台运行 | `false` |
-| `auth_token` | String | 访问管理后台或接口的鉴权 Token | `""` |
-| `listen_interface` | String | 指定服务监听的本地网口 (如 `br-lan`) | `""` |
-| `http_interface` | String | HTTP 模式拉流时使用的出口网口 | `""` |
-| `mitm_interface` | String | MITM 模式拉流时使用的出口网口 | `""` |
-| `stun_host` | String | STUN 服务器地址 | `stun.l.google.com` |
-| `stun_port` | Number | STUN 服务器端口 | `19302` |
+```toml
+[settings]
+port = 8554
+log_level = "info"
 
-### 2. URL 重写规则 (`replace_templates`)
+[security]
+blacklist = ["127.0.0.0/8", "169.254.0.0/16"]
 
-当请求路径匹配特定规则时，代理将自动变换上游地址。支持以下操作：
+[[upstream_routes]]
+cidr = "192.168.2.0/24"
+interface = "eth1"
+
+[[rewrite_rules]]
+action = "replace"
+match = "/iptv/import"
+replacement = "/iptv"
+```
+
+OpenWrt UCI 示例：
+
+```uci
+config rtsproxy 'main'
+	option enabled '1'
+	option port '8554'
+	list blacklist '127.0.0.0/8'
+
+config upstream_route
+	option cidr '192.168.2.0/24'
+	option interface 'eth1'
+
+config rewrite
+	option action 'replace'
+	option match '/iptv/import'
+	option replacement '/iptv'
+```
+
+URL 重写规则支持以下操作：
 
 | 操作类型 (`action`) | 说明 | 示例配置项 |
 | :--- | :--- | :--- |
@@ -134,9 +147,7 @@ Options:
 **通配符支持**：
 - `{number}`: 匹配任意连续数字（如频道 ID、时间戳）。
 
-### 3. 安全黑名单 (`blacklist`)
-
-包含一系列 CIDR 格式的 IP 地址段。代理将**拒绝**向这些地址发起上游连接，用于防止内网穿透攻击或递归环回死循环。
+`blacklist` 是可重复的 UCI list，包含 CIDR 格式的 IP 地址段。代理将**拒绝**向这些地址发起上游连接，用于防止内网穿透攻击或递归环回死循环。
 
 > [!NOTE]
 > **递归环回检测**：即使未配置黑名单，RTSProxy 也会自动识别并拒绝指向其自身监听端口的请求。
@@ -168,7 +179,7 @@ Options:
 
 - **一键安装**：见 [快速开始](#2-openwrt-一键安装)。
 - **UCI 配置**: `/etc/config/rtsproxy`。
-- **专家模式**：开启 `use_external_config` 后，程序将忽略 UCI 参数，直接读取 `/etc/rtsproxy/config.json`。
+- **LuCI 管理**：全局设置、黑名单、出口路由和 URL 重写规则均直接写入 UCI。
 
 ---
 > **LICENSE**: 本项目遵循开源协议。欢迎提交 Issue 或 Pull Request。
