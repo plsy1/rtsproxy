@@ -169,8 +169,9 @@ void RTSPToRtspClient::set_on_closed_callback(ClosedCallback cb)
 
 bool RTSPToRtspClient::connect_upstream()
 {
-    upstream_fd_ = create_nonblocking_tcp(ctx_.server_ip, ctx_.server_rtsp_port,
-                                          ServerConfig::getMitmUpstreamInterface());
+    upstream_fd_ = create_nonblocking_tcp(
+        ctx_.server_ip, ctx_.server_rtsp_port,
+        ServerConfig::getUpstreamInterface(ctx_.server_ip));
     if (upstream_fd_ < 0)
     {
         Logger::error("[MITM] Failed to connect to upstream " + ctx_.server_ip +
@@ -255,8 +256,9 @@ bool RTSPToRtspClient::extract_interleaved_channels(const std::string &req,
 bool RTSPToRtspClient::init_relay_sockets()
 {
     // 1. Allocate UPSTREAM-facing sockets (bound to mitm interface)
-    if (bind_udp_pair_from_pool(rtp_us_fd_.get_ref(), rtcp_us_fd_.get_ref(), 
-                                local_rtp_us_port_, ServerConfig::getMitmUpstreamInterface()) < 0)
+    if (bind_udp_pair_from_pool(
+            rtp_us_fd_.get_ref(), rtcp_us_fd_.get_ref(), local_rtp_us_port_,
+            ServerConfig::getUpstreamInterface(ctx_.server_ip)) < 0)
     {
         Logger::error("[MITM] Failed to bind upstream-facing UDP sockets");
         return false;

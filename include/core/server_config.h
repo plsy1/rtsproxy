@@ -16,14 +16,15 @@ public:
     static void setStunPort(int port);
     static void setStunHost(std::string host);
     static void setNatMethod(const std::string &method);
-    static void setJsonPath(std::string path);
+    static void setConfigPath(std::string path);
     static void setToken(std::string token);
-    static void setHttpUpstreamInterface(std::string iface);
-    static void setMitmUpstreamInterface(std::string iface);
+    static void addUpstreamRoute(const std::string &rule);
+    static void setUpstreamRoutes(const std::vector<std::string> &rules);
     static void setListenInterface(std::string iface);
     static void setLogFile(std::string path);
     static void setLogLines(size_t lines);
     static void setBlacklist(const std::vector<std::string> &list);
+    static void addBlacklist(const std::string &entry);
     static void setStripPadding(bool enable);
     static void setWaitKeyframe(bool enable);
     static void setWatchdogEnabled(bool enable);
@@ -38,10 +39,11 @@ public:
     static int getBufferPoolBlockSize();
     static int getStunPort();
     static std::string getStunHost();
-    static std::string getJsonPath();
+    static std::string getConfigPath();
     static std::string getToken();
-    static std::string getHttpUpstreamInterface();
-    static std::string getMitmUpstreamInterface();
+    static std::string getUpstreamInterface(const std::string &ip,
+                                            const std::string &fallback = "");
+    static const std::vector<std::string>& getUpstreamRoutes();
     static std::string getListenInterface();
     static std::string getLogFile();
     static size_t getLogLines();
@@ -52,7 +54,7 @@ public:
     static const std::vector<std::string>& getBlacklist();
     static void printUsage(const std::string &program_name);
     static void printConfig();
-    static bool loadFromFile(const std::string &path);
+    static bool loadTomlFile(const std::string &path);
     static void kill_previous_instance();
 
 private:
@@ -63,10 +65,9 @@ private:
     static int buffer_pool_block_size;
     static int stun_server_port;
     static std::string stun_server_host;
-    static std::string json_path;
+    static std::string config_path;
     static std::string auth_token;
-    static std::string http_upstream_interface;
-    static std::string mitm_upstream_interface;
+    static std::vector<std::string> upstream_routes;
     static std::string listen_interface;
     static std::string log_file_path;
     static size_t log_file_lines;

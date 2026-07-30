@@ -81,7 +81,9 @@ RTSPToHttpClient::~RTSPToHttpClient()
 
 bool RTSPToHttpClient::connect_server()
 {
-    rtsp_fd_ = create_nonblocking_tcp(ctx.server_ip, ctx.server_rtsp_port, ServerConfig::getHttpUpstreamInterface());
+    rtsp_fd_ = create_nonblocking_tcp(
+        ctx.server_ip, ctx.server_rtsp_port,
+        ServerConfig::getUpstreamInterface(ctx.server_ip));
 
     if (rtsp_fd_ < 0)
     {
@@ -670,7 +672,9 @@ void RTSPToHttpClient::build_and_send_request()
 
 void RTSPToHttpClient::init_rtp_rtcp_sockets()
 {
-    if (bind_udp_pair_from_pool(rtp_fd_.get_ref(), rtcp_fd_.get_ref(), rtp_port_, ServerConfig::getHttpUpstreamInterface()) < 0)
+    if (bind_udp_pair_from_pool(
+            rtp_fd_.get_ref(), rtcp_fd_.get_ref(), rtp_port_,
+            ServerConfig::getUpstreamInterface(ctx.server_ip)) < 0)
     {
         Logger::error("[RTP] Failed to bind RTP/RTCP sockets from pool");
         on_client_closed();

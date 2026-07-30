@@ -167,7 +167,7 @@ if [ "$INSTALLED_CORE" -eq 0 ]; then
         
         # 7.3 手动写入启动服务与默认配置文件（因为跳过了核心包的安装）
         echo "[*] 正在配置系统守护进程与服务项..."
-        mkdir -p /etc/init.d /etc/rtsproxy /etc/config
+        mkdir -p /etc/init.d /etc/config
         
         # 写入 init 启动脚本 (procd)
         cat << 'EOF' > /etc/init.d/rtsproxy
@@ -177,7 +177,7 @@ USE_PROCD=1
 
 start_service() {
     procd_open_instance
-    procd_set_param command /usr/bin/rtsproxy -c /etc/rtsproxy/config.json
+    procd_set_param command /usr/bin/rtsproxy
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -186,30 +186,12 @@ start_service() {
 EOF
         chmod +x /etc/init.d/rtsproxy
         
-        # 写入默认 JSON 配置文件（优先从 GitHub 对应 Tag 下载，确保版本配置契合）
-        if [ ! -f /etc/rtsproxy/config.json ]; then
-            echo "[*] 正在从 GitHub 仓库下载标准配置文件..."
-            if ! wget -qO "/etc/rtsproxy/config.json" "https://raw.githubusercontent.com/$REPO/$TAG/config.json"; then
-                echo "[!] 警告: 无法下载 Tag 版本的配置文件，尝试下载主分支配置..."
-                if ! wget -qO "/etc/rtsproxy/config.json" "https://raw.githubusercontent.com/$REPO/main/config.json"; then
-                    echo "[!] 警告: 无法从 GitHub 获取默认配置文件，写入一个极简本地配置保底。"
-                    cat << 'EOF' > /etc/rtsproxy/config.json
-{
-    "settings": {
-        "port": 8554,
-        "log_level": "info"
-    }
-}
-EOF
-                fi
-            fi
-        fi
-        
         # 写入默认 UCI 配置
         if [ ! -f /etc/config/rtsproxy ]; then
             cat << 'EOF' > /etc/config/rtsproxy
-config rtsproxy 'global'
+config rtsproxy 'main'
     option enabled '1'
+    option port '8554'
 EOF
         fi
         

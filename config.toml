@@ -1,0 +1,55 @@
+# RTSProxy standalone configuration.
+# OpenWrt installations use /etc/config/rtsproxy (UCI) instead.
+
+[settings]
+port = 8554
+enable_nat = false
+nat_method = "stun"
+buffer_pool_count = 8192
+buffer_pool_block_size = 2048
+log_level = "info"
+log_file = ""
+log_lines = 10000
+strip_padding = false
+wait_keyframe = false
+watchdog = false
+daemon = false
+auth_token = ""
+listen_interface = ""
+stun_host = "stun.l.google.com"
+stun_port = 19302
+
+[security]
+blacklist = [
+  "127.0.0.0/8",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+]
+
+# Route an upstream destination network through a specific Linux interface.
+# Add more [[upstream_routes]] sections as needed.
+#
+#[[upstream_routes]]
+#cidr = "192.168.2.0/24"
+#interface = "eth1"
+
+[[rewrite_rules]]
+action = "remove"
+match = "/{number}_Uni.sdp"
+
+[[rewrite_rules]]
+action = "replace"
+match = "/iptv/import"
+replacement = "/iptv"
+
+[[rewrite_rules]]
+action = "replace"
+match = "tvdr={number}-{number}"
+replacement = "tvdr={number}GMT-{number}GMT"
+
+[[rewrite_rules]]
+action = "timeshift"
+match = "tvdr={number}GMT-{number}GMT"
+shift_hours = -6
