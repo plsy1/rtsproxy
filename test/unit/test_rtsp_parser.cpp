@@ -453,6 +453,33 @@ void test_parse_url()
     CHECK_EQ(rtspParser::parse_url("rtsp://192.0.2.40:554/cam?chan=1&sub=0", e), 0);
     CHECK_EQ(e.path, std::string("/cam?chan=1&sub=0"));
 
+    SUITE("parse_url / Basic credentials");
+
+    rtspCtx auth{};
+    CHECK_EQ(rtspParser::parse_url(
+                 "rtsp://admin:test000111@192.0.2.41:554/live", auth),
+             0);
+    CHECK_EQ(auth.server_ip, std::string("192.0.2.41"));
+    CHECK_EQ(auth.server_rtsp_port, 554);
+    CHECK_EQ(auth.path, std::string("/live"));
+    CHECK_EQ(auth.rtsp_url, std::string("rtsp://192.0.2.41:554/live"));
+    CHECK_EQ(auth.basic_authorization,
+             std::string("Basic YWRtaW46dGVzdDAwMDExMQ=="));
+
+    rtspCtx encoded_auth{};
+    CHECK_EQ(rtspParser::parse_url(
+                 "rtsp://user%20name:p%40ss%3Aword@192.0.2.42/stream",
+                 encoded_auth),
+             0);
+    CHECK_EQ(encoded_auth.basic_authorization,
+             std::string("Basic dXNlciBuYW1lOnBAc3M6d29yZA=="));
+    CHECK_EQ(rtspParser::basic_authorization_from_url(
+                 "rtsp://admin:test000111@192.0.2.212:554/rtp/x"),
+             std::string("Basic YWRtaW46dGVzdDAwMDExMQ=="));
+    CHECK_EQ(rtspParser::basic_authorization_from_url(
+                 "rtsp://192.0.2.212:554/rtp/x"),
+             std::string(""));
+
     SUITE("parse_url / rejections");
 
     rtspCtx f{};
@@ -474,6 +501,11 @@ void test_parse_url()
     CHECK_EQ(rtspParser::parse_url("rtsp://192.0.2.10:0/x", l), -1);
     rtspCtx m{};
     CHECK_EQ(rtspParser::parse_url("rtsp://192.0.2.10:99999/x", m), -1);
+    rtspCtx missing_password_separator{};
+    CHECK_EQ(rtspParser::parse_url(
+                 "rtsp://admin@192.0.2.10:554/x",
+                 missing_password_separator),
+             -1);
 
     SUITE("parse_url / backslash and %5C stripping");
 

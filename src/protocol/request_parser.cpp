@@ -40,6 +40,34 @@ static void strip_backslashes(std::string &s)
     }
 }
 
+static void redact_url_userinfo(std::string &uri)
+{
+    if (uri.rfind("rtsp://", 0) == 0)
+    {
+        size_t authority_end = uri.find('/', 7);
+        size_t at = uri.find('@', 7);
+        if (at != std::string::npos &&
+            (authority_end == std::string::npos || at < authority_end))
+            uri.replace(7, at - 7, "***");
+    }
+
+    size_t route = uri.find("/rtp/");
+    size_t route_length = 5;
+    if (route == std::string::npos)
+    {
+        route = uri.find("/tv/");
+        route_length = 4;
+    }
+    if (route == std::string::npos)
+        return;
+    size_t authority_start = route + route_length;
+    size_t authority_end = uri.find('/', authority_start);
+    size_t at = uri.find('@', authority_start);
+    if (at != std::string::npos &&
+        (authority_end == std::string::npos || at < authority_end))
+        uri.replace(authority_start, at - authority_start, "***");
+}
+
 RequestInfo RequestParser::parse(const std::string &request_data)
 {
     RequestInfo info;
@@ -130,6 +158,8 @@ RequestInfo RequestParser::parse(const std::string &request_data)
         std::string sub_path = info.clean_uri.substr(path_start);
         URLRewriter::rewrite_path(sub_path, info.upstream_url);
     }
+
+    redact_url_userinfo(info.clean_uri);
 
     return info;
 }

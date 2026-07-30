@@ -1,19 +1,8 @@
 name: Build Check
 
 on:
-  push:
-    branches: [ "**" ]
-    paths:
-      - 'src/**'
-      - 'include/**'
-      - 'openwrt/**'
-      - 'test/**'
-      - 'meson.build'
-      - 'meson_options.txt'
-      - 'install.sh'
-      - '.github/workflows/check.yml'
   pull_request:
-    branches: [ "**" ]
+    branches: [ main ]
     paths:
       - 'src/**'
       - 'include/**'

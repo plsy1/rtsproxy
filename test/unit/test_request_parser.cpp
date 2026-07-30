@@ -417,6 +417,24 @@ int main()
                  "rtsp://192.0.2.10:5540/live");
         CHECK_EQ(P("PLAY rtsp://192.0.2.9:8554/tv/192.0.2.20:554/ch?a=1 RTSP/1.0").upstream_url,
                  "rtsp://192.0.2.20:554/ch?a=1");
+        RequestInfo basic = P(
+            "SETUP rtsp://admin:test000111@192.0.2.212:554/"
+            "rtp/192.0.2.198:554/ RTSP/1.0");
+        CHECK_EQ(basic.upstream_url, std::string("rtsp://192.0.2.198:554/"));
+        CHECK_EQ(basic.raw_uri,
+                 std::string("rtsp://admin:test000111@192.0.2.212:554/"
+                             "rtp/192.0.2.198:554/"));
+        CHECK_EQ(basic.clean_uri,
+                 std::string("rtsp://***@192.0.2.212:554/"
+                             "rtp/192.0.2.198:554/"));
+        RequestInfo embedded_basic = P(
+            "SETUP rtsp://192.0.2.212:554/"
+            "rtp/admin:test000111@192.0.2.198:554/live RTSP/1.0");
+        CHECK_EQ(embedded_basic.upstream_url,
+                 std::string("rtsp://admin:test000111@192.0.2.198:554/live"));
+        CHECK_EQ(embedded_basic.clean_uri,
+                 std::string("rtsp://192.0.2.212:554/"
+                             "rtp/***@192.0.2.198:554/live"));
         // ...but only when the prefix really starts the path.
         CHECK_EQ(P("DESCRIBE rtsp://192.0.2.9:8554/x/rtp/192.0.2.10:5540/live RTSP/1.0").upstream_url,
                  "");

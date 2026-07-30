@@ -347,6 +347,7 @@ void RTSPToHttpClient::on_rtsp_readable()
                     ctx.server_rtsp_port = temp_ctx.server_rtsp_port;
                     ctx.path = temp_ctx.path;
                     ctx.rtsp_url = temp_ctx.rtsp_url;
+                    ctx.basic_authorization = temp_ctx.basic_authorization;
 
                     current_request_.uri = "rtsp://" + ctx.server_ip + ":" + std::to_string(ctx.server_rtsp_port) + ctx.path;
                     
@@ -355,6 +356,8 @@ void RTSPToHttpClient::on_rtsp_readable()
                     req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
                     if (!ctx.session_id.empty())
                         req_buf_ += "Session: " + ctx.session_id + "\r\n";
+                    if (!ctx.basic_authorization.empty())
+                        req_buf_ += "Authorization: " + ctx.basic_authorization + "\r\n";
                     req_buf_ += current_request_.headers;
                     if (!current_request_.body.empty())
                         req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;
@@ -651,6 +654,8 @@ void RTSPToHttpClient::build_and_send_request()
         req_buf_ += "CSeq: " + std::to_string(current_request_.cseq) + "\r\n";
         if (!ctx.session_id.empty())
             req_buf_ += "Session: " + ctx.session_id + "\r\n";
+        if (!ctx.basic_authorization.empty())
+            req_buf_ += "Authorization: " + ctx.basic_authorization + "\r\n";
         req_buf_ += current_request_.headers;
         if (!current_request_.body.empty())
             req_buf_ += "Content-Length: " + std::to_string(current_request_.body.size()) + "\r\n\r\n" + current_request_.body;

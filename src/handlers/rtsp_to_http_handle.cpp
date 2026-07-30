@@ -27,7 +27,7 @@ bool RtspToHttpHandle::dispatch(int client_fd, const sockaddr_in &client_addr, c
             throw std::runtime_error("Recursive connection detected.");
         }
 
-        Logger::debug("[RTSP2HTTP] Dispatching session: " + client_host + " -> " + info.upstream_url);
+        Logger::debug("[RTSP2HTTP] Dispatching session: " + client_host + " -> " + ctx.rtsp_url);
         
         auto client = std::make_unique<RTSPToHttpClient>(loop, pool, client_addr, client_fd, ctx);
         loop->add_client_to_map(client_fd, std::move(client));
